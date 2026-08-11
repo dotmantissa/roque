@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { MessageSquare, Receipt, ExternalLink } from "lucide-react";
-import { tokens } from "@roque/shared";
+import { tokenByAddress } from "@roque/shared";
 import type { ActivityResult, IntentRow, TradeRow } from "@/lib/types";
 import { formatAmount, timeAgo, shorten } from "@/lib/format";
 
@@ -18,10 +18,7 @@ const EXPLORER_TX = "https://sepolia.etherscan.io/tx/";
 
 function symbolOf(address: string | null): string {
   if (!address) return "";
-  const a = address.toLowerCase();
-  if (a === tokens.USDC.address.toLowerCase()) return "USDC";
-  if (a === tokens.WETH.address.toLowerCase()) return "WETH";
-  return shorten(address, 4, 4);
+  return tokenByAddress(address)?.symbol ?? shorten(address, 4, 4);
 }
 
 const STATUS_TONE: Record<string, string> = {

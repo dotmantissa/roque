@@ -50,7 +50,7 @@ def test_market_buy_is_normalized(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
+            "tokenIn": "rUSDC",
             "tokenOut": "ETH",
             "amount": "100",
             "amountIsPercent": False,
@@ -62,8 +62,8 @@ def test_market_buy_is_normalized(contract: RoqueInterpreter) -> None:
     assert out["ok"] is True
     assert out["kind"] == "swap"
     assert out["action"] == "buy"
-    assert out["tokenIn"] == "USDC"
-    assert out["tokenOut"] == "WETH"  # ETH alias resolved to the real token
+    assert out["tokenIn"] == "rUSDC"
+    assert out["tokenOut"] == "rWETH"  # ETH alias resolved to the real token
     assert out["amount"] == "100"
     assert out["amountIsPercent"] is False
 
@@ -72,8 +72,8 @@ def test_market_sell_derives_action_from_tokens(contract: RoqueInterpreter) -> N
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "WETH",
-            "tokenOut": "USDC",
+            "tokenIn": "rWETH",
+            "tokenOut": "rUSDC",
             "amount": "0.5",
             "confidence": "medium",
             "reason": "Sell half an ether",
@@ -85,11 +85,46 @@ def test_market_sell_derives_action_from_tokens(contract: RoqueInterpreter) -> N
     assert out["amount"] == "0.5"
 
 
+def test_asset_to_asset_is_a_swap(contract: RoqueInterpreter) -> None:
+    # Bitcoin into gold: neither side is a stable, so it reads as a plain swap.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rWBTC",
+            "tokenOut": "rPAXG",
+            "amount": "1",
+            "reason": "Rotate bitcoin into gold",
+        }
+    )
+    out = _interpret(contract, "swap 1 BTC into gold")
+    assert out["ok"] is True
+    assert out["action"] == "swap"
+    assert out["tokenIn"] == "rWBTC"
+    assert out["tokenOut"] == "rPAXG"
+
+
+def test_stable_to_stable_is_a_swap(contract: RoqueInterpreter) -> None:
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rUSDT",
+            "amount": "500",
+            "reason": "Move dollars from USDC to USDT",
+        }
+    )
+    out = _interpret(contract, "swap 500 USDC to USDT")
+    assert out["ok"] is True
+    assert out["action"] == "swap"
+    assert out["tokenIn"] == "rUSDC"
+    assert out["tokenOut"] == "rUSDT"
+
+
 def test_limit_buy_the_dip(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "limit",
-            "tokenIn": "USDC",
+            "tokenIn": "rUSDC",
             "tokenOut": "ETH",
             "amount": "2500",
             "triggerPrice": "2400",
@@ -109,8 +144,8 @@ def test_limit_take_profit_above(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "limit",
-            "tokenIn": "WETH",
-            "tokenOut": "USDC",
+            "tokenIn": "rWETH",
+            "tokenOut": "rUSDC",
             "amount": "1",
             "triggerPrice": "3000",
             "triggerAbove": True,
@@ -127,8 +162,8 @@ def test_percent_amount_accepted(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "WETH",
-            "tokenOut": "USDC",
+            "tokenIn": "rWETH",
+            "tokenOut": "rUSDC",
             "amount": "50",
             "amountIsPercent": True,
             "reason": "Sell half the ether position",
@@ -152,8 +187,26 @@ def test_aliases_map_to_canonical_tokens(contract: RoqueInterpreter) -> None:
     )
     out = _interpret(contract, "put 250 dollars into ether")
     assert out["ok"] is True
-    assert out["tokenIn"] == "USDC"
-    assert out["tokenOut"] == "WETH"
+    assert out["tokenIn"] == "rUSDC"
+    assert out["tokenOut"] == "rWETH"
+
+
+def test_full_name_aliases_resolve(contract: RoqueInterpreter) -> None:
+    # Full names, not tickers, still land on the right token.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "chainlink",
+            "tokenOut": "gold",
+            "amount": "40",
+            "reason": "Rotate LINK into gold",
+        }
+    )
+    out = _interpret(contract, "swap 40 chainlink for gold")
+    assert out["ok"] is True
+    assert out["tokenIn"] == "rLINK"
+    assert out["tokenOut"] == "rPAXG"
+    assert out["action"] == "swap"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -165,7 +218,7 @@ def test_rejects_unknown_token(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
+            "tokenIn": "rUSDC",
             "tokenOut": "DOGE",
             "amount": "100",
             "reason": "Buy some doge",
@@ -180,7 +233,7 @@ def test_rejects_self_trade(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
+            "tokenIn": "rUSDC",
             "tokenOut": "USD",
             "amount": "100",
             "reason": "nonsense",
@@ -195,8 +248,8 @@ def test_rejects_zero_amount(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
-            "tokenOut": "WETH",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rWETH",
             "amount": "0",
             "reason": "zero",
         }
@@ -210,8 +263,8 @@ def test_rejects_non_numeric_amount(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
-            "tokenOut": "WETH",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rWETH",
             "amount": "a lot",
             "reason": "vague",
         }
@@ -225,8 +278,8 @@ def test_rejects_percent_over_100(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "WETH",
-            "tokenOut": "USDC",
+            "tokenIn": "rWETH",
+            "tokenOut": "rUSDC",
             "amount": "150",
             "amountIsPercent": True,
             "reason": "impossible percent",
@@ -241,8 +294,8 @@ def test_rejects_limit_without_trigger(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "limit",
-            "tokenIn": "USDC",
-            "tokenOut": "WETH",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rWETH",
             "amount": "2500",
             "triggerPrice": "",
             "triggerAbove": False,
@@ -252,6 +305,25 @@ def test_rejects_limit_without_trigger(contract: RoqueInterpreter) -> None:
     out = _interpret(contract, "buy ETH low")
     assert out["ok"] is False
     assert "trigger" in out["error"].lower()
+
+
+def test_rejects_limit_without_ether(contract: RoqueInterpreter) -> None:
+    # The order book only watches ether's price, so a limit on a non-ether pair
+    # could never trigger. The gate refuses it rather than escrow a dead order.
+    _model_says(
+        {
+            "kind": "limit",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rWBTC",
+            "amount": "1000",
+            "triggerPrice": "60000",
+            "triggerAbove": False,
+            "reason": "limit on bitcoin, which the book cannot watch",
+        }
+    )
+    out = _interpret(contract, "buy BTC with USDC if it drops below 60000")
+    assert out["ok"] is False
+    assert "rweth" in out["error"].lower() or "ether" in out["error"].lower()
 
 
 def test_rejects_unknown_kind(contract: RoqueInterpreter) -> None:
@@ -275,7 +347,7 @@ def test_survives_model_garbage(contract: RoqueInterpreter) -> None:
 def test_extracts_json_wrapped_in_fences(contract: RoqueInterpreter) -> None:
     # A model that wraps its answer in a code fence should still be understood.
     set_prompt_response(
-        '```json\n{"kind":"swap","tokenIn":"USDC","tokenOut":"WETH",'
+        '```json\n{"kind":"swap","tokenIn":"rUSDC","tokenOut":"rWETH",'
         '"amount":"100","reason":"fenced"}\n```'
     )
     out = _interpret(contract, "swap 100 USDC for ETH")
@@ -287,8 +359,8 @@ def test_thousands_separator_is_tolerated(contract: RoqueInterpreter) -> None:
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
-            "tokenOut": "WETH",
+            "tokenIn": "rUSDC",
+            "tokenOut": "rWETH",
             "amount": "1,000",
             "reason": "with a comma",
         }
@@ -300,16 +372,18 @@ def test_thousands_separator_is_tolerated(contract: RoqueInterpreter) -> None:
 
 def test_context_hint_does_not_widen_tokens(contract: RoqueInterpreter) -> None:
     # Even if context mentions another token, an out-of-set token is still cut.
+    # SHIB is genuinely outside the ten, so this must be refused regardless of
+    # what the hint says.
     _model_says(
         {
             "kind": "swap",
-            "tokenIn": "USDC",
-            "tokenOut": "WBTC",
+            "tokenIn": "rUSDC",
+            "tokenOut": "SHIB",
             "amount": "100",
-            "reason": "context tried to sneak in bitcoin",
+            "reason": "context tried to sneak in a shibcoin",
         }
     )
-    out = _interpret(contract, "swap 100 USDC for BTC", context={"hint": "WBTC is great"})
+    out = _interpret(contract, "swap 100 USDC for SHIB", context={"hint": "SHIB is great"})
     assert out["ok"] is False
 
 

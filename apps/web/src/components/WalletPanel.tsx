@@ -2,33 +2,40 @@
 
 /**
  * A person's own coins, the ones that never leave their wallet. This panel reads
- * the two balances straight off Sepolia and, because it is all testnet play
- * money, offers a faucet so a fresh wallet has something to trade in the first
- * minute. Nothing here can spend; it reads, and it asks the chain for a top up
- * the person signs for themselves.
+ * every balance straight off Sepolia and, because it is all testnet play money,
+ * offers a faucet so a fresh wallet has something to trade in the first minute.
+ * One button tops up everything at once; each row can also be pulled on its own.
+ * Nothing here can spend; it reads, and it asks the chain for a top up the person
+ * signs for themselves.
  */
 
 import { useState } from "react";
-import { Droplet, RefreshCw } from "lucide-react";
-import { tokens } from "@roque/shared";
+import Link from "next/link";
+import { Droplet, Droplets, RefreshCw } from "lucide-react";
+import { tokenList, requireToken } from "@roque/shared";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
-import { claimFaucet } from "@/lib/chain";
+import { claimFaucet, claimAllFaucets } from "@/lib/chain";
 import { formatAmount } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
 
+const EXPLORER = "https://sepolia.etherscan.io/tx/";
+const ALL = "__all__";
+
 export function WalletPanel({
   balances,
+  claims,
   loading,
   onRefresh,
 }: {
-  balances: { USDC: number; WETH: number } | null;
+  balances: Record<string, number> | null;
+  claims: Record<string, number> | null;
   loading: boolean;
   onRefresh: () => void;
 }) {
   const wallet = useWallet();
   const toast = useToast();
-  const [claiming, setClaiming] = useState<"USDC" | "WETH" | null>(null);
+  const [claiming, setClaiming] = useState<string | null>(null);
 
   if (!wallet.connected) {
     return (
@@ -41,19 +48,45 @@ export function WalletPanel({
     );
   }
 
-  const faucet = async (key: "USDC" | "WETH") => {
-    setClaiming(key);
+  const claimOne = async (symbol: string) => {
+    setClaiming(symbol);
     const pending = toast.push({
       kind: "pending",
-      title: `Sending you some ${key}`,
+      title: `Sending you some ${symbol}`,
       detail: "Approve the faucet call in your wallet.",
     });
     try {
       const { client, address } = await wallet.getClient();
-      const hash = await claimFaucet(client, address, tokens[key].address);
+      const hash = await claimFaucet(client, address, requireToken(symbol).address);
       toast.dismiss(pending);
-      toast.success(`Fresh ${key} landed`, "Have at it.", {
-        href: `https://sepolia.etherscan.io/tx/${hash}`,
+      toast.success(`Fresh ${symbol} landed`, "Have at it.", { href: `${EXPLORER}${hash}` });
+      onRefresh();
+    } catch (err) {
+      toast.dismiss(pending);
+      const message = (err as Error).message || "The faucet did not run.";
+      if (/rejected|denied/iu.test(message)) {
+        toast.info("Faucet waved off", "You turned that one down.");
+      } else {
+        toast.error("Faucet did not run", message);
+      }
+    } finally {
+      setClaiming(null);
+    }
+  };
+
+  const claimEverything = async () => {
+    setClaiming(ALL);
+    const pending = toast.push({
+      kind: "pending",
+      title: "Topping up every token",
+      detail: "One signature covers the whole set.",
+    });
+    try {
+      const { client, address } = await wallet.getClient();
+      const hash = await claimAllFaucets(client, address);
+      toast.dismiss(pending);
+      toast.success("Your wallet is stocked", "Every token you can still claim just landed.", {
+        href: `${EXPLORER}${hash}`,
       });
       onRefresh();
     } catch (err) {
@@ -69,10 +102,7 @@ export function WalletPanel({
     }
   };
 
-  const rows: Array<{ key: "USDC" | "WETH"; label: string }> = [
-    { key: "USDC", label: "USDC" },
-    { key: "WETH", label: "WETH" },
-  ];
+  const busy = claiming !== null;
 
   return (
     <section className="panel card">
@@ -88,31 +118,45 @@ export function WalletPanel({
         </button>
       </header>
 
+      <button className="btn btn-primary claim-all" onClick={() => void claimEverything()} disabled={busy}>
+        {claiming === ALL ? <span className="spinner" /> : <Droplets size={15} />}
+        Claim all test tokens
+      </button>
+
       <div className="balance-list">
-        {rows.map(({ key, label }) => (
-          <div key={key} className="balance-row">
-            <span className="balance-token">
-              <TokenIcon symbol={key} size={26} />
-              <span className="balance-symbol">{label}</span>
-            </span>
-            <span className="balance-amount tabular">
-              {loading && !balances ? (
-                <span className="skeleton" style={{ width: 68, height: 18, display: "inline-block" }} />
-              ) : (
-                formatAmount(balances?.[key] ?? 0)
-              )}
-            </span>
-            <button
-              className="balance-faucet"
-              onClick={() => void faucet(key)}
-              disabled={claiming !== null}
-            >
-              {claiming === key ? <span className="spinner" /> : <Droplet size={13} />}
-              Faucet
-            </button>
-          </div>
-        ))}
+        {tokenList.map((t) => {
+          const remaining = claims?.[t.symbol];
+          const tappedOut = remaining === 0;
+          return (
+            <div key={t.symbol} className="balance-row">
+              <span className="balance-token">
+                <TokenIcon symbol={t.symbol} size={26} />
+                <span className="balance-symbol">{t.symbol}</span>
+              </span>
+              <span className="balance-amount tabular">
+                {loading && !balances ? (
+                  <span className="skeleton" style={{ width: 68, height: 18, display: "inline-block" }} />
+                ) : (
+                  formatAmount(balances?.[t.symbol] ?? 0)
+                )}
+              </span>
+              <button
+                className="balance-faucet"
+                onClick={() => void claimOne(t.symbol)}
+                disabled={busy || tappedOut}
+                title={tappedOut ? "You have used every claim for this token" : "Claim more"}
+              >
+                {claiming === t.symbol ? <span className="spinner" /> : <Droplet size={13} />}
+                {tappedOut ? "Maxed" : "Faucet"}
+              </button>
+            </div>
+          );
+        })}
       </div>
+
+      <Link href="/faucet" className="panel-foot-link">
+        Open the full faucet
+      </Link>
     </section>
   );
 }

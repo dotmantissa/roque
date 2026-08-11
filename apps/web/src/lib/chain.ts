@@ -17,13 +17,20 @@ import {
   http,
   maxUint256,
   parseUnits,
+  type Abi,
   type Account,
   type EIP1193Provider,
   type Hex,
   type WalletClient,
 } from "viem";
 import { sepolia } from "viem/chains";
-import { abis, addresses, eip712Domain, eip712Types, tokens } from "@roque/shared";
+import {
+  abis,
+  addresses,
+  eip712Domain,
+  eip712Types,
+  tokenList,
+} from "@roque/shared";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
@@ -38,6 +45,7 @@ const erc20 = abis.testToken;
 const router = abis.router;
 const executor = abis.agentExecutor;
 const orderBook = abis.orderBook;
+const faucetRouter = abis.faucetRouter;
 
 /** Build a wallet client for reads-that-need-an-account and every write. */
 export function walletClientFrom(
@@ -89,20 +97,48 @@ export async function ensureSepolia(provider: EIP1193Provider): Promise<void> {
 
 // ── Reads ───────────────────────────────────────────────────────
 
+/** Every tradable token's balance for a wallet, in human units, keyed by symbol. */
 export async function walletBalances(
   user: `0x${string}`,
-): Promise<{ USDC: number; WETH: number }> {
-  const [usdc, weth] = await publicClient.multicall({
-    contracts: [
-      { address: tokens.USDC.address, abi: erc20, functionName: "balanceOf", args: [user] },
-      { address: tokens.WETH.address, abi: erc20, functionName: "balanceOf", args: [user] },
-    ],
+): Promise<Record<string, number>> {
+  const raws = await publicClient.multicall({
+    contracts: tokenList.map((t) => ({
+      address: t.address,
+      abi: erc20 as Abi,
+      functionName: "balanceOf",
+      args: [user],
+    })),
     allowFailure: false,
   });
-  return {
-    USDC: Number(usdc) / 10 ** tokens.USDC.decimals,
-    WETH: Number(weth) / 10 ** tokens.WETH.decimals,
-  };
+  const out: Record<string, number> = {};
+  tokenList.forEach((t, i) => {
+    out[t.symbol] = Number(raws[i]) / 10 ** t.decimals;
+  });
+  return out;
+}
+
+/**
+ * How many faucet claims each token still allows this wallet, keyed by symbol.
+ * TestToken caps a wallet at MAX_CLAIMS pulls; this reads what is left so the UI
+ * can grey out a token that is tapped out rather than letting a claim revert.
+ */
+export async function faucetClaimsRemaining(
+  user: `0x${string}`,
+): Promise<Record<string, number>> {
+  const raws = await publicClient.multicall({
+    contracts: tokenList.map((t) => ({
+      address: t.address,
+      abi: erc20 as Abi,
+      functionName: "claimsRemaining",
+      args: [user],
+    })),
+    allowFailure: false,
+  });
+  const out: Record<string, number> = {};
+  tokenList.forEach((t, i) => {
+    out[t.symbol] = Number(raws[i]);
+  });
+  return out;
 }
 
 async function allowance(
@@ -118,7 +154,7 @@ async function allowance(
   }) as Promise<bigint>;
 }
 
-/** Pull a faucet of test tokens so a fresh wallet has something to trade. */
+/** Pull a faucet of a single test token so a fresh wallet has something to trade. */
 export async function claimFaucet(
   wallet: WalletClient,
   user: `0x${string}`,
@@ -131,6 +167,29 @@ export async function claimFaucet(
     abi: erc20,
     functionName: "faucet",
     args: [],
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/**
+ * Claim every token in one transaction through the FaucetRouter. It calls each
+ * token's faucet in a try/catch, so a token this wallet has already tapped out
+ * is quietly skipped rather than reverting the whole batch. Returns the count it
+ * actually delivered alongside the tx hash.
+ */
+export async function claimAllFaucets(
+  wallet: WalletClient,
+  user: `0x${string}`,
+): Promise<Hex> {
+  const tokenAddresses = tokenList.map((t) => t.address);
+  const hash = await wallet.writeContract({
+    account: user as unknown as Account,
+    chain: sepolia,
+    address: addresses.faucetRouter,
+    abi: faucetRouter,
+    functionName: "claimAll",
+    args: [tokenAddresses],
   });
   await publicClient.waitForTransactionReceipt({ hash });
   return hash;

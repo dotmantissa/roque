@@ -7,28 +7,112 @@ import json
 import re
 
 
-# The only assets Roque settles on Sepolia. The interpreter treats "ETH" and
-# "ether" as WETH because that is what the pool actually holds. Nothing outside
-# this set is ever allowed to leave the contract as a valid intent, no matter
-# what the language model says. This is the hard line: the model reads English,
-# but this set decides what counts as a real token.
-KNOWN_TOKENS = ("USDC", "WETH")
+# The ten assets Roque settles on Sepolia, by their on-chain symbols. Every
+# tradable token carries the r prefix because they are Roque's own minted test
+# tokens, each pinned to a real Chainlink feed. Nothing outside this set is ever
+# allowed to leave the contract as a valid intent, no matter what the language
+# model says. This is the hard line: the model reads English, but this tuple
+# decides what counts as a real token.
+KNOWN_TOKENS = (
+    "rUSDC",
+    "rUSDT",
+    "rDAI",
+    "rWETH",
+    "rWBTC",
+    "rLINK",
+    "rSNX",
+    "rFORTH",
+    "rEURC",
+    "rPAXG",
+)
 
-# How the interpreter maps the loose words people actually type onto the two
+# The three dollar stablecoins in the set. Used only to phrase a trade as a buy,
+# a sell, or a plain swap for the human-readable summary; it changes nothing
+# about what the contract permits.
+STABLES = ("rUSDC", "rUSDT", "rDAI")
+
+# The one asset whose USD price the OrderBook actually watches. Resting limit
+# orders are gated on the ETH/USD Chainlink feed the book was deployed against,
+# so a limit only has a coherent trigger when ether is one side of the trade.
+# Market swaps have no such restriction; they work across all forty-five pairs.
+TRIGGER_TOKEN = "rWETH"
+
+# How the interpreter maps the loose words people actually type onto the ten
 # canonical symbols above. Applied deterministically, after the model answers,
-# so a hallucinated ticker cannot slip through.
+# so a hallucinated ticker cannot slip through. The keys are upper-cased because
+# that is how a symbol arrives here after normalisation; both the bare ticker a
+# person types ("eth", "gold") and the canonical form the model is asked to emit
+# ("rWETH") resolve to the same token.
 TOKEN_ALIASES = {
-    "USDC": "USDC",
-    "USD": "USDC",
-    "USDT": "USDC",
-    "DOLLAR": "USDC",
-    "DOLLARS": "USDC",
-    "STABLE": "USDC",
-    "STABLECOIN": "USDC",
-    "WETH": "WETH",
-    "ETH": "WETH",
-    "ETHER": "WETH",
-    "ETHEREUM": "WETH",
+    # Dollar stables. "USD", "dollar" and the like default to rUSDC, the
+    # canonical dollar; rUSDT and rDAI are their own tokens and never collapse
+    # into it.
+    "RUSDC": "rUSDC",
+    "USDC": "rUSDC",
+    "USD": "rUSDC",
+    "USDCOIN": "rUSDC",
+    "DOLLAR": "rUSDC",
+    "DOLLARS": "rUSDC",
+    "STABLE": "rUSDC",
+    "STABLECOIN": "rUSDC",
+    "RUSDT": "rUSDT",
+    "USDT": "rUSDT",
+    "TETHER": "rUSDT",
+    "RDAI": "rDAI",
+    "DAI": "rDAI",
+    # Ether, which almost everyone calls ETH even though the pool holds WETH.
+    "RWETH": "rWETH",
+    "WETH": "rWETH",
+    "ETH": "rWETH",
+    "ETHER": "rWETH",
+    "ETHEREUM": "rWETH",
+    "WRAPPEDETH": "rWETH",
+    "WRAPPEDETHER": "rWETH",
+    # Bitcoin, likewise usually said as BTC.
+    "RWBTC": "rWBTC",
+    "WBTC": "rWBTC",
+    "BTC": "rWBTC",
+    "XBT": "rWBTC",
+    "BITCOIN": "rWBTC",
+    "WRAPPEDBTC": "rWBTC",
+    "WRAPPEDBITCOIN": "rWBTC",
+    # The rest, ticker and full name both.
+    "RLINK": "rLINK",
+    "LINK": "rLINK",
+    "CHAINLINK": "rLINK",
+    "RSNX": "rSNX",
+    "SNX": "rSNX",
+    "SYNTHETIX": "rSNX",
+    "RFORTH": "rFORTH",
+    "FORTH": "rFORTH",
+    "AMPLEFORTH": "rFORTH",
+    "REURC": "rEURC",
+    "EURC": "rEURC",
+    "EUR": "rEURC",
+    "EURO": "rEURC",
+    "EUROS": "rEURC",
+    "EUROC": "rEURC",
+    "EUROCOIN": "rEURC",
+    "RPAXG": "rPAXG",
+    "PAXG": "rPAXG",
+    "PAXGOLD": "rPAXG",
+    "GOLD": "rPAXG",
+    "XAU": "rPAXG",
+}
+
+# A short, human line for each token so the prompt can teach the model the set
+# without a wall of text. Order matches KNOWN_TOKENS.
+_TOKEN_BLURB = {
+    "rUSDC": "a US dollar stablecoin",
+    "rUSDT": "Tether, a US dollar stablecoin",
+    "rDAI": "Dai, a US dollar stablecoin",
+    "rWETH": "wrapped ether, which people call ETH or ether",
+    "rWBTC": "wrapped bitcoin, which people call BTC",
+    "rLINK": "Chainlink's LINK token",
+    "rSNX": "Synthetix's SNX token",
+    "rFORTH": "Ampleforth's FORTH token",
+    "rEURC": "a euro stablecoin, said as EUR or euros",
+    "rPAXG": "Pax Gold, a token backed by an ounce of gold",
 }
 
 # A plain decimal amount like "100" or "0.5". No leading sign, no exponent, no
@@ -41,12 +125,13 @@ class RoqueInterpreter(gl.Contract):
     """
     Turns a sentence of plain English into a structured trade Roque can act on.
 
-    A person types "swap 100 USDC for ETH" or "buy ether if it dips below 2400"
-    and this contract returns a tidy object: what to sell, what to buy, how much,
-    and, for a resting order, the price that should wake it up. The language model
-    does the reading. It never does the deciding. Every field it proposes is run
-    back through deterministic checks here, and anything that does not line up
-    with the two tokens Roque actually trades is thrown out with a reason.
+    A person types "swap 100 USDC for ETH", "move 500 dai into gold", or "buy
+    link if it dips below 12" and this contract returns a tidy object: what to
+    sell, what to buy, how much, and, for a resting order, the price that should
+    wake it up. The language model does the reading. It never does the deciding.
+    Every field it proposes is run back through deterministic checks here, and
+    anything that does not line up with the ten tokens Roque actually trades is
+    thrown out with a reason.
 
     Worth being blunt about the trust story: this contract holds no money and
     signs nothing. Its answer is a suggestion the off-chain relayer picks up,
@@ -75,7 +160,7 @@ class RoqueInterpreter(gl.Contract):
         Read a trading instruction and store the structured version of it.
 
         `context_json` is an optional hint bag the relayer fills in, for example
-        the live ETH price or which balances the user holds. It only ever informs
+        the live prices or which balances the user holds. It only ever informs
         the reading; it can never widen what tokens are allowed. Returns None on
         purpose and stashes the answer, which keeps the simulator from tripping
         over return serialisation on the nondet path.
@@ -107,10 +192,12 @@ class RoqueInterpreter(gl.Contract):
         self.interpretations[request_id] = stored
 
     def _build_prompt(self, command: str, context_json: str) -> str:
+        token_lines = "\n".join(f"- {sym}: {_TOKEN_BLURB[sym]}" for sym in KNOWN_TOKENS)
         return f"""
-You translate a person's trading request into strict JSON for a small exchange
-that only trades two assets: USDC (a dollar stablecoin) and WETH (wrapped ether,
-which people usually just call ETH or ether).
+You translate a person's trading request into strict JSON for Roque, a small
+exchange. Roque trades exactly these ten tokens and nothing else. Use the symbol
+on the left verbatim in your answer:
+{token_lines}
 
 Optional context from the app, treat only as a hint, never as permission to use
 other tokens:
@@ -123,8 +210,8 @@ Decide the following and answer with ONLY a JSON object, no prose, no code
 fences:
 {{
   "kind": "swap" | "limit" | "unknown",
-  "tokenIn": "USDC" | "WETH",
-  "tokenOut": "USDC" | "WETH",
+  "tokenIn": "<one of the ten symbols above>",
+  "tokenOut": "<one of the ten symbols above>",
   "amount": "<decimal number as a string, e.g. 100 or 0.5>",
   "amountIsPercent": true | false,
   "triggerPrice": "<ETH price in USD as a string, limit orders only, else empty>",
@@ -136,14 +223,18 @@ fences:
 Rules:
 - "swap" means do it now. "limit" means wait for a price. If it is neither a
   buy nor a sell, use "unknown".
-- Buying ETH means tokenIn USDC and tokenOut WETH. Selling ETH is the reverse.
+- tokenIn is what the person gives up, tokenOut is what they receive. "Buy X
+  with Y" means tokenIn Y and tokenOut X. "Sell X for Y" means tokenIn X and
+  tokenOut Y. "Swap X to Y" means tokenIn X and tokenOut Y.
 - "half", "all", "25 percent" set amountIsPercent true and amount the number
   only ("50", "100", "25").
-- For a limit, triggerAbove is true when the order should fire as the price
-  rises ("if it goes above", "when it hits") and false when it should fire as
-  the price falls ("if it drops below", "buy the dip").
-- Never invent a token. If the request names something that is not USDC or WETH,
-  use kind "unknown".
+- Resting limit orders track ether's dollar price only, so use "limit" solely
+  when rWETH is one of the two tokens. For any other pair use "swap". For a
+  limit, triggerPrice is that ETH/USD price, triggerAbove is true when the order
+  should fire as the price rises ("if it goes above", "when it hits") and false
+  when it should fire as the price falls ("if it drops below", "buy the dip").
+- Never invent a token. If the request names something outside the ten symbols
+  above, use kind "unknown".
 """.strip()
 
     def _extract_json(self, raw: str) -> dict:
@@ -172,6 +263,7 @@ Rules:
         if not isinstance(value, str):
             return ""
         key = value.strip().upper()
+        # Tolerate bridged-token notation like "USDC.e".
         if key.endswith(".E"):
             key = key[:-2]
         return TOKEN_ALIASES.get(key, "")
@@ -236,19 +328,24 @@ Rules:
         trigger_price = ""
         trigger_above = bool(candidate.get("triggerAbove", False))
         if kind == "limit":
+            # The book only knows ether's price, so a limit is only coherent when
+            # ether is one side of the trade. Everything else becomes a plain
+            # swap suggestion rather than an order that could never trigger.
+            if TRIGGER_TOKEN not in (token_in, token_out):
+                reject["error"] = (
+                    "resting orders track ether's price, so a limit needs rWETH "
+                    "on one side; try a market swap for this pair"
+                )
+                return reject
             trigger_price = str(candidate.get("triggerPrice", "")).strip().replace(",", "")
             if not _AMOUNT_RE.match(trigger_price) or re.match(r"^0(\.0+)?$", trigger_price):
                 reject["error"] = "limit order needs a positive trigger price"
                 return reject
 
-        # Derive the action from the tokens rather than trusting the model to
-        # keep its own story straight. Buying ether is anything that ends in WETH.
-        action = "buy" if token_out == "WETH" else "sell"
-
         return {
             "ok": True,
             "kind": kind,
-            "action": action,
+            "action": self._derive_action(token_in, token_out),
             "tokenIn": token_in,
             "tokenOut": token_out,
             "amount": amount,
@@ -259,6 +356,21 @@ Rules:
             "reason": str(candidate.get("reason", ""))[:200],
             "error": "",
         }
+
+    def _derive_action(self, token_in: str, token_out: str) -> str:
+        """
+        Phrase the trade for the human summary, derived from the tokens rather
+        than trusting the model's own label. Spending a stable to get an asset
+        reads as a buy, the reverse as a sell, and anything else, asset to asset
+        or stable to stable, is just a swap.
+        """
+        in_stable = token_in in STABLES
+        out_stable = token_out in STABLES
+        if in_stable and not out_stable:
+            return "buy"
+        if out_stable and not in_stable:
+            return "sell"
+        return "swap"
 
     def _percent_in_range(self, amount: str) -> bool:
         """True when 0 < amount <= 100, checked without ever building a float."""

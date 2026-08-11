@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Settings2 } from "lucide-react";
 import type { Mode } from "@/lib/types";
 import { api } from "@/lib/api";
-import { walletBalances } from "@/lib/chain";
+import { walletBalances, faucetClaimsRemaining } from "@/lib/chain";
 import { usePoll } from "@/lib/hooks";
 import { useWallet } from "@/lib/useWallet";
 import { Header } from "@/components/Header";
@@ -62,11 +62,17 @@ export default function Home() {
     15_000,
     [address],
   );
+  const claims = usePoll(
+    address ? () => faucetClaimsRemaining(address) : null,
+    30_000,
+    [address],
+  );
   const vault = usePoll(address ? () => api.vault(address) : null, 20_000, [address]);
   const capability = usePoll(address ? () => api.capability(address) : null, 20_000, [address]);
   const activity = usePoll(address ? () => api.activity(address) : null, 15_000, [address]);
 
   const ethUsd = price.data?.ethUsd ?? 0;
+  const prices = price.data?.prices ?? {};
 
   const canAutonomous = useMemo(() => {
     const cap = capability.data;
@@ -78,6 +84,7 @@ export default function Home() {
   // so the side panels catch up without waiting on the next poll tick.
   const refreshAll = () => {
     balances.refresh();
+    claims.refresh();
     vault.refresh();
     capability.refresh();
     activity.refresh();
@@ -127,6 +134,7 @@ export default function Home() {
                 mode={mode}
                 ethUsd={ethUsd}
                 balances={balances.data}
+                prices={prices}
                 canAutonomous={canAutonomous}
                 slippageBps={slippageBps}
                 onSettled={refreshAll}
@@ -136,8 +144,9 @@ export default function Home() {
             <aside className="workbench-side">
               <WalletPanel
                 balances={balances.data}
+                claims={claims.data}
                 loading={balances.loading}
-                onRefresh={balances.refresh}
+                onRefresh={refreshAll}
               />
 
               {mode === "autonomous" ? (

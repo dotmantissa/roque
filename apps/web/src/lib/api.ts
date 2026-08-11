@@ -14,6 +14,7 @@ import type {
   Mode,
   PrepareResult,
   PriceResult,
+  ReservesResult,
   VaultResult,
 } from "./types";
 
@@ -49,10 +50,17 @@ export const api = {
     return request<PriceResult>("/price");
   },
 
+  reserves(a: string, b: string) {
+    return request<ReservesResult>("/reserves", {
+      method: "POST",
+      body: JSON.stringify({ a, b }),
+    });
+  },
+
   prepareSwap(input: {
     id?: string;
-    from: "USDC" | "WETH";
-    to: "USDC" | "WETH";
+    from: string;
+    to: string;
     amount: string;
     slippageBps: number;
   }) {

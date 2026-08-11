@@ -34,6 +34,7 @@ export function IntentCard({
   mode,
   ethUsd,
   balances,
+  prices,
   canAutonomous,
   slippageBps,
   onSettled,
@@ -41,7 +42,8 @@ export function IntentCard({
   result: InterpretResult;
   mode: Mode;
   ethUsd: number;
-  balances: { USDC: number; WETH: number } | null;
+  balances: Record<string, number> | null;
+  prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
   onSettled?: () => void;
@@ -108,13 +110,13 @@ export function IntentCard({
           : interp.amount;
 
         if (isLimit) {
-          const order = buildLimitOrder(interp, amount, ethUsd, slippageBps);
+          const order = buildLimitOrder(interp, amount, ethUsd, prices, slippageBps);
           hash = await copilotLimitOrder(client, address, order);
         } else {
           const prep = await api.prepareSwap({
             id: result.id,
-            from: interp.tokenIn as "USDC" | "WETH",
-            to: interp.tokenOut as "USDC" | "WETH",
+            from: interp.tokenIn,
+            to: interp.tokenOut,
             amount,
             slippageBps,
           });
@@ -216,7 +218,7 @@ export function IntentCard({
         <div className="intent-quote">
           <span className="intent-quote-cell">
             <span className="intent-quote-label">Rate</span>
-            <span className="tabular">1 WETH = ${formatPrice(quote.price)}</span>
+            <span className="tabular">1 {inLabel} = {formatAmount(quote.price)} {outLabel}</span>
           </span>
           <span className="intent-quote-divider" />
           <span className="intent-quote-cell">

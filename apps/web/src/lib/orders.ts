@@ -6,13 +6,8 @@
  */
 
 import { parseUnits } from "viem";
-import { tokens, type TokenMeta } from "@roque/shared";
+import { requireToken } from "@roque/shared";
 import type { Interpretation } from "./types";
-
-export function tokenBySymbol(symbol: string): TokenMeta {
-  if (symbol === "USDC" || symbol === "WETH") return tokens[symbol];
-  throw new Error(`Roque does not trade ${symbol}.`);
-}
 
 /**
  * A percent amount only means something against a balance. In copilot mode the
@@ -21,21 +16,21 @@ export function tokenBySymbol(symbol: string): TokenMeta {
  */
 export function resolveConcreteAmount(
   interp: Interpretation,
-  walletBalances: { USDC: number; WETH: number },
+  walletBalances: Record<string, number>,
 ): string {
   if (!interp.amountIsPercent) return interp.amount;
   const percent = Number(interp.amount);
   if (!Number.isFinite(percent) || percent <= 0) {
     throw new Error("That percentage did not read as a positive number.");
   }
-  const symbol = interp.tokenIn as "USDC" | "WETH";
-  const base = walletBalances[symbol] ?? 0;
+  const token = requireToken(interp.tokenIn);
+  const base = walletBalances[token.symbol] ?? 0;
   const amount = (base * percent) / 100;
   if (amount <= 0) {
-    throw new Error(`You do not hold any ${symbol} to take a percentage of.`);
+    throw new Error(`You do not hold any ${token.symbol} to take a percentage of.`);
   }
   // Trim to the token's precision so parseUnits never chokes on a long float.
-  return amount.toFixed(tokenBySymbol(symbol).decimals);
+  return amount.toFixed(token.decimals);
 }
 
 /** Scale a USD price to the 1e8 fixed point the order book stores. */
@@ -55,30 +50,49 @@ export interface LimitOrderArgs {
 
 const LIMIT_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
 
+// The one asset the order book actually watches. A resting order tracks ether's
+// dollar price, so every limit must have rWETH on one side; the other leg is
+// valued at its live oracle price when we compute the output floor.
+const WETH_SYMBOL = "rWETH";
+
 /**
  * Build the order the book will hold until its trigger is met. The floor on the
- * output is derived from the trigger price the order fires at, discounted by the
- * slippage the person allowed, so a fill can never come in worse than they said.
+ * output is derived by valuing both legs in dollars, the ether leg at the price
+ * the order fires at and the other leg at its live oracle price, then discounting
+ * by the slippage the person allowed. A fill can never come in worse than that.
  */
 export function buildLimitOrder(
   interp: Interpretation,
   concreteAmount: string,
-  fallbackPrice: number,
+  triggerFallback: number,
+  prices: Record<string, number>,
   slippageBps: number,
 ): LimitOrderArgs {
-  const tokenIn = tokenBySymbol(interp.tokenIn);
-  const tokenOut = tokenBySymbol(interp.tokenOut);
+  const tokenIn = requireToken(interp.tokenIn);
+  const tokenOut = requireToken(interp.tokenOut);
   const amountInRaw = parseUnits(concreteAmount, tokenIn.decimals);
 
-  const price = interp.triggerPrice ? Number(interp.triggerPrice) : fallbackPrice;
-  if (!Number.isFinite(price) || price <= 0) {
+  const triggerPrice = interp.triggerPrice ? Number(interp.triggerPrice) : triggerFallback;
+  if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
     throw new Error("That order needs a price to trigger at.");
   }
 
+  if (tokenIn.symbol !== WETH_SYMBOL && tokenOut.symbol !== WETH_SYMBOL) {
+    throw new Error(
+      "A resting order only tracks ether's price, so a limit needs rWETH on one side. Try a market swap for this pair.",
+    );
+  }
+
+  const usdPerUnit = (symbol: string): number =>
+    symbol === WETH_SYMBOL ? triggerPrice : prices[symbol] ?? 0;
+  const usdIn = usdPerUnit(tokenIn.symbol);
+  const usdOut = usdPerUnit(tokenOut.symbol);
+  if (usdIn <= 0 || usdOut <= 0) {
+    throw new Error("Roque could not price that pair just now. Give it a moment and try again.");
+  }
+
   const amountHuman = Number(concreteAmount);
-  // Selling WETH gives USDC at the price; spending USDC gives WETH at 1/price.
-  const expectedOut =
-    tokenOut.key === "USDC" ? amountHuman * price : amountHuman / price;
+  const expectedOut = (amountHuman * usdIn) / usdOut;
   const minOutHuman = expectedOut * (1 - slippageBps / 10_000);
   const minAmountOutRaw = parseUnits(
     minOutHuman.toFixed(tokenOut.decimals),
@@ -90,7 +104,7 @@ export function buildLimitOrder(
     tokenOut: tokenOut.address,
     amountInRaw,
     minAmountOutRaw,
-    triggerPrice: toTriggerPrice(price),
+    triggerPrice: toTriggerPrice(triggerPrice),
     triggerAbove: interp.triggerAbove,
     expiry: BigInt(Math.floor(Date.now() / 1000) + LIMIT_EXPIRY_SECONDS),
   };

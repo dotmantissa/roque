@@ -9,10 +9,10 @@
  * garden they hold the only gate to.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { parseUnits } from "viem";
 import { ArrowDownToLine, ArrowUpFromLine, Vault } from "lucide-react";
-import { tokens } from "@roque/shared";
+import { tokenList, requireToken } from "@roque/shared";
 import type { VaultResult } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
@@ -33,9 +33,19 @@ export function VaultPanel({
 }) {
   const wallet = useWallet();
   const toast = useToast();
-  const [token, setToken] = useState<"USDC" | "WETH">("USDC");
+  const [token, setToken] = useState<string>(tokenList[0]?.symbol ?? "rUSDC");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState<"deposit" | "withdraw" | null>(null);
+
+  const balances = vault?.balances ?? {};
+
+  // Show a token in the balance strip when it holds something, and always show
+  // the one currently selected so the panel never looks empty while you work.
+  const shown = useMemo(() => {
+    return tokenList.filter(
+      (t) => t.symbol === token || Number(balances[t.symbol] ?? 0) > 0,
+    );
+  }, [balances, token]);
 
   if (!wallet.connected) return null;
 
@@ -53,12 +63,13 @@ export function VaultPanel({
       detail: "Approve it in your wallet.",
     });
     try {
+      const meta = requireToken(token);
       const { client, address } = await wallet.getClient();
-      const raw = parseUnits(human, tokens[token].decimals);
+      const raw = parseUnits(human, meta.decimals);
       const hash =
         direction === "deposit"
-          ? await depositToVault(client, address, tokens[token].address, raw)
-          : await withdrawFromVault(client, address, tokens[token].address, raw);
+          ? await depositToVault(client, address, meta.address, raw)
+          : await withdrawFromVault(client, address, meta.address, raw);
       toast.dismiss(pending);
       toast.success(
         direction === "deposit" ? "Funds are in the vault" : "Funds are back in your wallet",
@@ -90,37 +101,40 @@ export function VaultPanel({
       </header>
 
       <div className="vault-balances">
-        {(["USDC", "WETH"] as const).map((k) => (
-          <div key={k} className="vault-bal">
-            <TokenIcon symbol={k} size={22} />
+        {shown.map((t) => (
+          <div key={t.symbol} className="vault-bal">
+            <TokenIcon symbol={t.symbol} size={22} />
             <span className="tabular">
-              {loading && !vault ? "—" : formatAmount(vault?.[k] ?? 0)}
+              {loading && !vault ? "—" : formatAmount(balances[t.symbol] ?? 0)}
             </span>
-            <span className="vault-bal-sym">{k}</span>
+            <span className="vault-bal-sym">{t.symbol}</span>
           </div>
         ))}
       </div>
 
       <div className="vault-form">
-        <div className="seg">
-          {(["USDC", "WETH"] as const).map((k) => (
-            <button
-              key={k}
-              className={`seg-btn ${token === k ? "is-active" : ""}`}
-              onClick={() => setToken(k)}
-            >
-              {k}
-            </button>
-          ))}
-        </div>
+        <div className="vault-row">
+          <select
+            className="token-select"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            aria-label="Token to move"
+          >
+            {tokenList.map((t) => (
+              <option key={t.symbol} value={t.symbol}>
+                {t.symbol}
+              </option>
+            ))}
+          </select>
 
-        <input
-          className="vault-input tabular"
-          inputMode="decimal"
-          placeholder="0.0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/gu, ""))}
-        />
+          <input
+            className="vault-input tabular"
+            inputMode="decimal"
+            placeholder="0.0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/gu, ""))}
+          />
+        </div>
 
         <div className="vault-actions">
           <button

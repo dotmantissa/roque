@@ -1234,6 +1234,146 @@ h1, h2, h3, h4 {
   color: var(--text-faint);
 }
 
+/* ── Market price ticker ───────────────────────────────────────── */
+
+.market-ticker-cell { flex: 1; min-width: 0; }
+.market-ticker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px 18px;
+  padding: 2px 0;
+}
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.98rem;
+  font-weight: 560;
+}
+.ticker-price { color: var(--text); }
+
+/* ── Token select + claim-all + panel foot link ────────────────── */
+
+.token-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 12px 36px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23767c85' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  font-size: 1.02rem;
+  font-weight: 560;
+  color: inherit;
+  outline: none;
+  cursor: pointer;
+}
+.token-select:focus { border-color: var(--accent); background-color: var(--surface); }
+.vault-row { display: grid; grid-template-columns: minmax(0, 42%) 1fr; gap: 10px; }
+
+.claim-all { width: 100%; margin-bottom: 16px; }
+
+.panel-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 15px;
+  font-size: 0.84rem;
+  font-weight: 560;
+  color: var(--accent);
+}
+.panel-foot-link::after { content: "→"; transition: transform 0.18s ease; }
+.panel-foot-link:hover::after { transform: translateX(3px); }
+
+/* ── Faucet page ───────────────────────────────────────────────── */
+
+.faucet-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 26px;
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.faucet-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 540;
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+.faucet-back:hover { color: var(--accent); }
+.faucet-title { font-size: clamp(1.8rem, 3.2vw, 2.4rem); margin-bottom: 10px; }
+.faucet-sub { max-width: 560px; font-size: 1rem; color: var(--text-dim); line-height: 1.6; }
+.faucet-hero-side { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.faucet-claimall {
+  min-width: 210px;
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.05s;
+}
+.faucet-note { font-size: 0.8rem; color: var(--text-faint); }
+
+.faucet-connect {
+  display: grid;
+  place-items: center;
+  gap: 16px;
+  padding: 64px 24px;
+  text-align: center;
+}
+.faucet-connect p { color: var(--text-dim); max-width: 380px; }
+
+.faucet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 16px;
+}
+.faucet-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.faucet-card-head { display: flex; align-items: center; gap: 12px; }
+.faucet-card-names { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.faucet-card-sym { font-weight: 620; font-size: 1.02rem; }
+.faucet-card-name {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.faucet-card-bal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+.faucet-card-bal-label { font-size: 0.76rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.faucet-card-bal-num { font-size: 1.08rem; font-weight: 580; }
+.faucet-claims { display: flex; align-items: center; gap: 8px; }
+.faucet-pips { display: inline-flex; gap: 4px; }
+.faucet-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.faucet-pip.is-used { background: var(--border-strong); }
+.faucet-claims-label { font-size: 0.78rem; color: var(--text-faint); margin-left: auto; }
+.faucet-card-btn { width: 100%; margin-top: auto; }
+
 /* ── Responsive ────────────────────────────────────────────────── */
 
 @media (max-width: 940px) {

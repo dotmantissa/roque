@@ -52,7 +52,8 @@ export interface PriceResult {
   ethUsd: number;
   updatedAt: number;
   ageSeconds: number;
-  reserves: { usdc: number; weth: number };
+  // Every tradable token's live USD price, keyed by on-chain symbol.
+  prices: Record<string, number>;
 }
 
 export interface CapabilityResult {
@@ -68,9 +69,17 @@ export interface CapabilityResult {
 }
 
 export interface VaultResult {
-  USDC: string;
-  WETH: string;
-  raw: { USDC: string; WETH: string };
+  // Human-unit balances and exact raw strings, both keyed by token symbol.
+  balances: Record<string, string>;
+  raw: Record<string, string>;
+}
+
+/** A single pool's reserves, mirroring PoolReserves from the quote layer. */
+export interface ReservesResult {
+  a: string;
+  b: string;
+  reserveA: number;
+  reserveB: number;
 }
 
 export interface IntentRow {

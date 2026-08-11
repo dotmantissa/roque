@@ -14,10 +14,15 @@
 
 import { randomUUID } from "node:crypto";
 import { parseUnits, formatUnits } from "viem";
-import { tokens, addresses, type TokenMeta } from "@roque/shared";
+import {
+  addresses,
+  tokenBySymbol,
+  tokenSymbols,
+  type TokenMeta,
+} from "@roque/shared";
 import { interpret, type Interpretation } from "./genlayer.js";
 import { quoteSwap, minOutForSlippage } from "./quote.js";
-import { ethUsd, toTriggerPrice } from "./prices.js";
+import { ethUsd, tokenUsd, toTriggerPrice } from "./prices.js";
 import {
   signSwapIntent,
   signLimitIntent,
@@ -54,11 +59,6 @@ export interface InterpretResult {
     usdValue: number;
   };
   message: string;
-}
-
-function tokenBySymbol(symbol: string): TokenMeta | undefined {
-  if (symbol === "USDC" || symbol === "WETH") return tokens[symbol];
-  return undefined;
 }
 
 /**
@@ -171,16 +171,11 @@ export async function interpretCommand(params: {
   let quote: InterpretResult["quote"];
   try {
     if (!interp.amountIsPercent) {
-      const quoted = await quoteSwap(
-        interp.tokenIn as "USDC" | "WETH",
-        interp.tokenOut as "USDC" | "WETH",
-        interp.amount,
-      );
-      const price = await ethUsd();
-      const usd =
-        tokenIn.key === "USDC"
-          ? Number(interp.amount)
-          : Number(interp.amount) * price.usd;
+      const quoted = await quoteSwap(interp.tokenIn, interp.tokenOut, interp.amount);
+      // Value the input side in dollars off its own Chainlink feed, exactly the
+      // way the executor will, so the preview and the on-chain cap agree.
+      const unitUsd = await tokenUsd(interp.tokenIn);
+      const usd = Number(interp.amount) * unitUsd;
       quote = {
         tokenIn: interp.tokenIn,
         tokenOut: interp.tokenOut,
@@ -210,9 +205,9 @@ export async function interpretCommand(params: {
 async function buildContext(): Promise<Record<string, unknown>> {
   try {
     const price = await ethUsd();
-    return { ethUsd: price.usd, tokens: ["USDC", "WETH"] };
+    return { ethUsd: price.usd, tokens: tokenSymbols };
   } catch {
-    return { tokens: ["USDC", "WETH"] };
+    return { tokens: tokenSymbols };
   }
 }
 
@@ -223,8 +218,8 @@ async function buildContext(): Promise<Record<string, unknown>> {
  */
 export async function prepareCopilotSwap(params: {
   id?: string;
-  fromSymbol: "USDC" | "WETH";
-  toSymbol: "USDC" | "WETH";
+  fromSymbol: string;
+  toSymbol: string;
   amount: string;
   slippageBps: number;
 }): Promise<{
@@ -292,11 +287,7 @@ export async function executeAutonomous(params: {
     );
   }
 
-  const quoted = await quoteSwap(
-    interp.tokenIn as "USDC" | "WETH",
-    interp.tokenOut as "USDC" | "WETH",
-    amountStr,
-  );
+  const quoted = await quoteSwap(interp.tokenIn, interp.tokenOut, amountStr);
   const minOut = minOutForSlippage(
     quoted.amountOutRaw,
     Math.min(params.slippageBps, Number(cap.maxSlippageBps)),

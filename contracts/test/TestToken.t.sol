@@ -17,35 +17,53 @@ contract TestTokenTest is Test {
         assertEq(token.symbol(), "USDC");
         assertEq(token.decimals(), 6);
         assertEq(token.faucetAmount(), 1_000e6);
+        assertEq(token.MAX_CLAIMS(), 5);
     }
 
     function test_FaucetMintsStandardAmount() public {
         vm.prank(bob);
         token.faucet();
         assertEq(token.balanceOf(bob), 1_000e6);
+        assertEq(token.claimCount(bob), 1);
     }
 
     function test_FaucetToSeedsAnotherAddress() public {
         vm.prank(bob);
         token.faucetTo(alice());
+        // The cap follows the receiver, not the caller.
         assertEq(token.balanceOf(alice()), 1_000e6);
+        assertEq(token.claimCount(alice()), 1);
+        assertEq(token.claimCount(bob), 0);
     }
 
-    function test_FaucetRevertsWhileOnCooldown() public {
+    function test_FaucetAllowsUpToMaxClaims() public {
         vm.startPrank(bob);
-        token.faucet();
-        vm.expectRevert();
+        for (uint256 i = 0; i < 5; i++) {
+            token.faucet();
+        }
+        vm.stopPrank();
+        assertEq(token.balanceOf(bob), 5_000e6);
+        assertEq(token.claimsRemaining(bob), 0);
+    }
+
+    function test_FaucetRevertsOnceExhausted() public {
+        vm.startPrank(bob);
+        for (uint256 i = 0; i < 5; i++) {
+            token.faucet();
+        }
+        vm.expectRevert(abi.encodeWithSelector(TestToken.FaucetExhausted.selector, bob));
         token.faucet();
         vm.stopPrank();
     }
 
-    function test_FaucetWorksAgainAfterCooldown() public {
+    function test_ClaimsRemainingCountsDown() public {
+        assertEq(token.claimsRemaining(bob), 5);
         vm.startPrank(bob);
         token.faucet();
-        vm.warp(block.timestamp + token.FAUCET_COOLDOWN());
+        assertEq(token.claimsRemaining(bob), 4);
         token.faucet();
+        assertEq(token.claimsRemaining(bob), 3);
         vm.stopPrank();
-        assertEq(token.balanceOf(bob), 2_000e6);
     }
 
     function test_OwnerCanMint() public {
@@ -59,14 +77,19 @@ contract TestTokenTest is Test {
         token.mint(bob, 5_000e6);
     }
 
-    function testFuzz_FaucetCooldownBoundary(uint256 wait) public {
-        wait = bound(wait, 0, token.FAUCET_COOLDOWN() - 1);
+    function testFuzz_NeverExceedsMaxClaims(uint256 pulls) public {
+        pulls = bound(pulls, 0, 20);
         vm.startPrank(bob);
-        token.faucet();
-        vm.warp(block.timestamp + wait);
-        vm.expectRevert();
-        token.faucet();
+        uint256 succeeded;
+        for (uint256 i = 0; i < pulls; i++) {
+            try token.faucet() {
+                succeeded++;
+            } catch {}
+        }
         vm.stopPrank();
+        uint256 expected = pulls > 5 ? 5 : pulls;
+        assertEq(succeeded, expected);
+        assertEq(token.claimCount(bob), expected);
     }
 
     function alice() internal pure returns (address) {

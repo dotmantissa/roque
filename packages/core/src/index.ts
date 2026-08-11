@@ -19,9 +19,24 @@ export {
   type Adjudication,
 } from "./genlayer.js";
 
-// Reading the live market and the price the contracts trust.
-export { quoteSwap, poolReserves, minOutForSlippage, type Quote } from "./quote.js";
-export { ethUsd, usdValue, toTriggerPrice, type EthPrice } from "./prices.js";
+// Reading the live market and the prices the contracts trust.
+export {
+  quoteSwap,
+  poolReserves,
+  minOutForSlippage,
+  type Quote,
+  type PoolReserves,
+} from "./quote.js";
+export {
+  ethUsd,
+  feedUsd,
+  tokenUsd,
+  allTokenUsd,
+  usdValue,
+  toTriggerPrice,
+  type EthPrice,
+  type FeedPrice,
+} from "./prices.js";
 
 // Signing and submitting agent intents, and reading a user's autonomous state.
 export {

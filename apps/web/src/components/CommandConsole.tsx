@@ -26,9 +26,9 @@ interface Turn {
 
 const SUGGESTIONS = [
   "Swap 250 USDC into ETH",
-  "Sell 0.4 WETH for USDC",
+  "Move 500 USDC into WBTC",
+  "Trade 300 DAI for LINK",
   "Sell half my WETH if ETH hits 4,200",
-  "Buy ETH with 100 USDC when it dips to 3,000",
 ];
 
 let turnSeq = 0;
@@ -37,13 +37,15 @@ export function CommandConsole({
   mode,
   ethUsd,
   balances,
+  prices,
   canAutonomous,
   slippageBps,
   onSettled,
 }: {
   mode: Mode;
   ethUsd: number;
-  balances: { USDC: number; WETH: number } | null;
+  balances: Record<string, number> | null;
+  prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
   onSettled?: () => void;
@@ -148,6 +150,7 @@ export function CommandConsole({
                     mode={mode}
                     ethUsd={ethUsd}
                     balances={balances}
+                    prices={prices}
                     canAutonomous={canAutonomous}
                     slippageBps={slippageBps}
                     onSettled={onSettled}

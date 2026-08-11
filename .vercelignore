@@ -1,0 +1,6 @@
+# Heavy trees the web build never imports.
+contracts
+apps/relayer
+packages/genlayer
+ARCHITECTURE.md
+**/.git

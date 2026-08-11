@@ -14,6 +14,7 @@ import {
   handleInterpret,
   handleQuote,
   handlePrice,
+  handleReserves,
   handlePrepareSwap,
   handleConfirmSwap,
   handleGrant,
@@ -53,6 +54,7 @@ app.get("/agent", async () => handleAgentInfo());
 // ── Judgment and market ───────────────────────────────────────
 app.post("/interpret", async (req) => handleInterpret(req.body));
 app.post("/quote", async (req) => handleQuote(req.body));
+app.post("/reserves", async (req) => handleReserves(req.body));
 app.get("/price", async () => handlePrice());
 
 // ── Copilot: user-signed swaps ────────────────────────────────

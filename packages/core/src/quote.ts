@@ -2,12 +2,12 @@
  * Reading the live market off Sepolia. Quotes come straight from the deployed
  * router, which reads the constant product pool, so a number the UI shows is the
  * same number the swap will honour, give or take the moves between the two
- * blocks. The ETH price comes from the same Chainlink feed the contracts trust,
- * so the dollar figures on screen match the dollar caps enforced on-chain.
+ * blocks. Prices come from the same Chainlink feeds the contracts trust, so the
+ * dollar figures on screen match the dollar caps enforced on-chain.
  */
 
 import { formatUnits, parseUnits } from "viem";
-import { addresses, abis, tokens, type TokenMeta } from "@roque/shared";
+import { addresses, abis, requireToken, poolAddressFor, type TokenMeta } from "@roque/shared";
 import { publicClient } from "./chain.js";
 
 export interface Quote {
@@ -21,23 +21,20 @@ export interface Quote {
   price: number;
 }
 
-function tokenFor(symbol: "USDC" | "WETH"): TokenMeta {
-  return tokens[symbol];
-}
-
 /**
- * Quote an exact-input swap. `amountIn` is in human units ("100", "0.5"); we
- * convert to the token's own decimals, ask the router, and convert back. A pool
- * with no liquidity or a nonexistent pair makes the router revert, which we let
+ * Quote an exact-input swap between any two of our tokens, named by symbol.
+ * `amountIn` is in human units ("100", "0.5"); we convert to the token's own
+ * decimals, ask the router, and convert back. The router finds the single pool
+ * for the pair itself; a missing pair or a dry pool makes it revert, which we let
  * bubble up rather than paper over with a fake zero.
  */
 export async function quoteSwap(
-  fromSymbol: "USDC" | "WETH",
-  toSymbol: "USDC" | "WETH",
+  fromSymbol: string,
+  toSymbol: string,
   amountIn: string,
 ): Promise<Quote> {
-  const tokenIn = tokenFor(fromSymbol);
-  const tokenOut = tokenFor(toSymbol);
+  const tokenIn = requireToken(fromSymbol);
+  const tokenOut = requireToken(toSymbol);
   const amountInRaw = parseUnits(amountIn, tokenIn.decimals);
 
   const amountOutRaw = (await publicClient().readContract({
@@ -55,35 +52,50 @@ export async function quoteSwap(
   return { tokenIn, tokenOut, amountIn, amountInRaw, amountOut, amountOutRaw, price };
 }
 
+export interface PoolReserves {
+  a: string; // token symbol
+  b: string; // token symbol
+  reserveA: number; // human units of token a
+  reserveB: number; // human units of token b
+}
+
 /**
- * The pool's current reserves, in human units, labelled by token. Useful for a
- * depth readout and for sanity checking a quote against how much is actually in
- * the pool.
+ * The current reserves of one pool in the mesh, in human units and labelled by
+ * symbol. Useful for a depth readout and for sanity checking a quote against how
+ * much is actually in that pair's pool.
  */
-export async function poolReserves(): Promise<{ usdc: number; weth: number }> {
-  const [r0, r1] = (await publicClient().readContract({
-    address: addresses.pool,
-    abi: abis.liquidityPool,
-    functionName: "getReserves",
-    args: [],
-  })) as [bigint, bigint];
+export async function poolReserves(symbolA: string, symbolB: string): Promise<PoolReserves> {
+  const tokenA = requireToken(symbolA);
+  const tokenB = requireToken(symbolB);
+  const poolAddress = poolAddressFor(symbolA, symbolB);
+  const client = publicClient();
+
+  const [[r0, r1], token0] = await Promise.all([
+    client.readContract({
+      address: poolAddress,
+      abi: abis.liquidityPool,
+      functionName: "getReserves",
+      args: [],
+    }) as Promise<[bigint, bigint]>,
+    client.readContract({
+      address: poolAddress,
+      abi: abis.liquidityPool,
+      functionName: "token0",
+      args: [],
+    }) as Promise<`0x${string}`>,
+  ]);
 
   // The pool sorts its tokens by address; ask which reserve is which rather than
   // assuming an order.
-  const token0 = (await publicClient().readContract({
-    address: addresses.pool,
-    abi: abis.liquidityPool,
-    functionName: "token0",
-    args: [],
-  })) as `0x${string}`;
-
-  const usdcIsToken0 = token0.toLowerCase() === tokens.USDC.address.toLowerCase();
-  const usdcRaw = usdcIsToken0 ? r0 : r1;
-  const wethRaw = usdcIsToken0 ? r1 : r0;
+  const aIsToken0 = token0.toLowerCase() === tokenA.address.toLowerCase();
+  const rawA = aIsToken0 ? r0 : r1;
+  const rawB = aIsToken0 ? r1 : r0;
 
   return {
-    usdc: Number(formatUnits(usdcRaw, tokens.USDC.decimals)),
-    weth: Number(formatUnits(wethRaw, tokens.WETH.decimals)),
+    a: tokenA.symbol,
+    b: tokenB.symbol,
+    reserveA: Number(formatUnits(rawA, tokenA.decimals)),
+    reserveB: Number(formatUnits(rawB, tokenB.decimals)),
   };
 }
 

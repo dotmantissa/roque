@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import { formatUnits } from "viem";
-import { tokens, addresses } from "@roque/shared";
+import { tokenList, tokenSymbols, addresses } from "@roque/shared";
 import {
   interpretCommand,
   prepareCopilotSwap,
@@ -19,7 +19,7 @@ import {
   tradeHistory,
 } from "./services.js";
 import { quoteSwap, poolReserves } from "./quote.js";
-import { ethUsd } from "./prices.js";
+import { ethUsd, allTokenUsd } from "./prices.js";
 import {
   submitGrant,
   getCapability,
@@ -46,7 +46,11 @@ const address = z
   .regex(/^0x[a-fA-F0-9]{40}$/u, "That does not look like an Ethereum address.")
   .transform((s) => s as `0x${string}`);
 
-const symbol = z.enum(["USDC", "WETH"]);
+// Any of our ten tradable tokens, named by its on-chain symbol. Validated
+// against the live registry so a typo is a clean 400, not a downstream revert.
+const symbol = z
+  .string()
+  .refine((s) => tokenSymbols.includes(s), "That is not a token Roque trades.");
 
 /** Fold a zod failure into a clean 400 rather than leaking the whole issue tree. */
 function parse<S extends z.ZodTypeAny>(schema: S, body: unknown): z.infer<S> {
@@ -104,13 +108,27 @@ export async function handleQuote(body: unknown) {
 }
 
 export async function handlePrice() {
-  const [price, reserves] = await Promise.all([ethUsd(), poolReserves()]);
+  const [price, prices] = await Promise.all([ethUsd(), allTokenUsd()]);
   return {
     ethUsd: price.usd,
     updatedAt: price.updatedAt,
     ageSeconds: price.ageSeconds,
-    reserves,
+    // Every token's live USD price, keyed by symbol, so the UI can value any
+    // balance or pair without a round trip per token.
+    prices,
   };
+}
+
+// Depth for a specific pair in the mesh, on demand. The market view asks for the
+// pair the user is actually looking at rather than one privileged pool.
+const reservesSchema = z.object({ a: symbol, b: symbol });
+
+export async function handleReserves(body: unknown) {
+  const input = parse(reservesSchema, body);
+  if (input.a === input.b) {
+    throw new ApiError(400, "Pick two different tokens to see a pool.");
+  }
+  return poolReserves(input.a, input.b);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -243,15 +261,18 @@ export async function handleCapability(userRaw: string) {
 
 export async function handleVault(userRaw: string) {
   const user = parse(address, userRaw);
-  const [usdc, weth] = await Promise.all([
-    vaultBalance(user, tokens.USDC.address),
-    vaultBalance(user, tokens.WETH.address),
-  ]);
-  return {
-    USDC: formatUnits(usdc, tokens.USDC.decimals),
-    WETH: formatUnits(weth, tokens.WETH.decimals),
-    raw: { USDC: usdc.toString(), WETH: weth.toString() },
-  };
+  // Read every token's vaulted balance in parallel and return two symbol-keyed
+  // maps: human units for display, raw strings for exact math on the client.
+  const raws = await Promise.all(
+    tokenList.map((t) => vaultBalance(user, t.address)),
+  );
+  const balances: Record<string, string> = {};
+  const raw: Record<string, string> = {};
+  tokenList.forEach((t, i) => {
+    balances[t.symbol] = formatUnits(raws[i], t.decimals);
+    raw[t.symbol] = raws[i].toString();
+  });
+  return { balances, raw };
 }
 
 export async function handleActivity(userRaw: string, limit = 25) {
@@ -285,9 +306,9 @@ export function handleHealth() {
       router: addresses.router,
       orderBook: addresses.orderBook,
       agentExecutor: addresses.agentExecutor,
-      usdc: addresses.usdc,
-      weth: addresses.weth,
+      faucetRouter: addresses.faucetRouter,
     },
+    tokens: Object.fromEntries(tokenList.map((t) => [t.symbol, t.address])),
     agentSigner: agentSignerAddress(),
   };
 }
