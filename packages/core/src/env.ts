@@ -71,6 +71,12 @@ export function serverEnv() {
     // deployment the deployer wallet doubles as that gas payer; a production
     // setup would use a dedicated, minimally funded hot wallet.
     relayerKey: normalizeKey(optional("RELAYER_PRIVATE_KEY") || required("DEPLOYER_PRIVATE_KEY")),
+    // When both are present the relayer's Sepolia writes egress through a Latch
+    // proxy instead of straight to the RPC: Latch injects the real provider key,
+    // rate limits the channel and keeps a signed audit trail. Leave them unset
+    // and the relayer talks to SEPOLIA_RPC_URL directly, exactly as before.
+    latchRpcUrl: optional("LATCH_RPC_URL"),
+    latchToken: optional("LATCH_TOKEN"),
     databaseUrl: required("DATABASE_URL"),
     // A shared secret guarding the cron routes so only Vercel's scheduler, not
     // the open internet, can nudge the keeper and indexer.

@@ -36,15 +36,28 @@ let _wallet: WalletClient | undefined;
  * The write side of Sepolia, keyed by the relayer wallet. Only ever called from
  * server code; it reads a secret and will throw if one is missing, which keeps
  * it from being pulled into a browser bundle by mistake.
+ *
+ * If a Latch proxy is configured, the wallet's egress is pointed at it and every
+ * transaction the relayer submits carries the scoped `lat_` token instead of the
+ * raw RPC key. Latch injects the real credential, rate limits the channel and
+ * audits it. With Latch unset we talk to the RPC directly, unchanged.
  */
 export function relayerWallet(): WalletClient {
   if (!_wallet) {
     const env = serverEnv();
     const account = privateKeyToAccount(env.relayerKey);
+    const useLatch = env.latchRpcUrl !== "" && env.latchToken !== "";
+    const transport = useLatch
+      ? http(env.latchRpcUrl, {
+          fetchOptions: {
+            headers: { Authorization: `Bearer ${env.latchToken}` },
+          },
+        })
+      : http(env.sepoliaRpcUrl);
     _wallet = createWalletClient({
       account,
       chain: sepolia as Chain,
-      transport: http(env.sepoliaRpcUrl),
+      transport,
     });
   }
   return _wallet;
