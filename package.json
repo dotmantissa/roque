@@ -13,5 +13,16 @@
     "build:web": "pnpm --filter @roque/web build",
     "typecheck": "pnpm -r typecheck"
   },
-  "packageManager": "pnpm@11.2.2"
+  "packageManager": "pnpm@11.2.2",
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "@reown/appkit",
+      "bufferutil",
+      "es5-ext",
+      "esbuild",
+      "keccak",
+      "sharp",
+      "utf-8-validate"
+    ]
+  }
 }
