@@ -1,0 +1,27 @@
+{
+  "name": "@roque/relayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The standalone Roque backend: a small Fastify service that turns plain-English commands into signed Sepolia intents, quotes the live market, relays capability grants, and runs the keeper and indexer that keep limit orders honest and history current.",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "start": "tsx --env-file=../../.env src/server.ts",
+    "keeper": "tsx --env-file=../../.env src/workers.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@roque/core": "workspace:*",
+    "@roque/shared": "workspace:*",
+    "fastify": "^5.2.0",
+    "viem": "^2.55.13",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "pino-pretty": "^13.1.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

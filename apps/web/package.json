@@ -1,0 +1,29 @@
+{
+  "name": "@roque/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Roque, the agent native DEX. Trade by clicking, or by talking. Your wallet signs, your agent executes, the chain decides.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@privy-io/react-auth": "^1.90.1",
+    "@roque/core": "workspace:*",
+    "@roque/shared": "workspace:*",
+    "lucide-react": "^0.469.0",
+    "next": "^15.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "viem": "^2.55.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.3"
+  }
+}

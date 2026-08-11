@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# env & secrets — NEVER COMMIT
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/**/dry-run/
+contracts/.gas-snapshot
+
+# next / vercel
+.next/
+out/
+.vercel/
+build/
+dist/
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# genlayer
+**/__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/

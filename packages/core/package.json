@@ -1,0 +1,39 @@
+{
+  "name": "@roque/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The shared brains of Roque: chain clients, GenLayer calls, quoting, intent signing, indexer and keeper logic. One implementation, used by both the standalone relayer and the web app's serverless routes.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env.ts",
+    "./chain": "./src/chain.ts",
+    "./genlayer": "./src/genlayer.ts",
+    "./quote": "./src/quote.ts",
+    "./intents": "./src/intents.ts",
+    "./prices": "./src/prices.ts",
+    "./services": "./src/services.ts",
+    "./api": "./src/api.ts",
+    "./indexer": "./src/indexer.ts",
+    "./keeper": "./src/keeper.ts",
+    "./db": "./src/db/index.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/db/migrate.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.1",
+    "@roque/shared": "workspace:*",
+    "genlayer-js": "^1.1.8",
+    "viem": "^2.55.13",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

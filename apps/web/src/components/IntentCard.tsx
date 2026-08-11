@@ -1,0 +1,272 @@
+"use client";
+
+/**
+ * One turn of the conversation, made concrete. The interpreter has already read
+ * the person's words into a structured intent; this card shows them exactly what
+ * that means as a trade, quotes it against the live pool, and offers the one
+ * button that fits the mode. In copilot mode that button asks their own wallet to
+ * sign; in autonomous mode it hands the intent to Roque, who signs within the
+ * capability they granted. A trade the interpreter could not make shows up here
+ * too, as a plain, unbothered refusal rather than a dead end.
+ */
+
+import { useState } from "react";
+import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash } from "lucide-react";
+import type { InterpretResult, Mode } from "@/lib/types";
+import { useWallet } from "@/lib/useWallet";
+import { useToast } from "./Toaster";
+import { api } from "@/lib/api";
+import { walletBalances, copilotSwap, copilotLimitOrder } from "@/lib/chain";
+import { resolveConcreteAmount, buildLimitOrder } from "@/lib/orders";
+import { formatAmount, formatUsd, formatPrice } from "@/lib/format";
+import { TokenIcon } from "./TokenIcon";
+
+type CardState = "idle" | "working" | "done" | "failed";
+
+const EXPLORER = "https://sepolia.etherscan.io/tx/";
+
+function isRejection(message: string): boolean {
+  return /rejected|denied|declined|user cancel/iu.test(message);
+}
+
+export function IntentCard({
+  result,
+  mode,
+  ethUsd,
+  balances,
+  canAutonomous,
+  slippageBps,
+  onSettled,
+}: {
+  result: InterpretResult;
+  mode: Mode;
+  ethUsd: number;
+  balances: { USDC: number; WETH: number } | null;
+  canAutonomous: boolean;
+  slippageBps: number;
+  onSettled?: () => void;
+}) {
+  const wallet = useWallet();
+  const toast = useToast();
+  const [state, setState] = useState<CardState>("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const interp = result.interpretation;
+  const quote = result.quote;
+  const isLimit = interp.kind === "limit";
+
+  // A refusal, or a command that did not read as a trade. No action, no drama.
+  if (!interp.ok || interp.kind === "unknown") {
+    return (
+      <div className="intent-card intent-card-refused animate-rise">
+        <div className="intent-refused-icon">
+          <CircleSlash size={18} />
+        </div>
+        <div>
+          <p className="intent-refused-title">Roque held off on that one</p>
+          <p className="intent-refused-body">{result.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const concretePreview = (): string | null => {
+    if (!interp.amountIsPercent) return interp.amount;
+    if (!balances) return null;
+    try {
+      return resolveConcreteAmount(interp, balances);
+    } catch {
+      return null;
+    }
+  };
+
+  const run = async () => {
+    if (!wallet.connected || !wallet.address) {
+      wallet.login();
+      return;
+    }
+    setState("working");
+    const pending = toast.push({
+      kind: "pending",
+      title: mode === "autonomous" ? "Roque is on it" : "Waiting on your wallet",
+      detail:
+        mode === "autonomous"
+          ? "Signing the intent and sending it to Sepolia."
+          : "Approve the trade in your wallet to send it.",
+    });
+
+    try {
+      let hash: string;
+
+      if (mode === "autonomous") {
+        const res = await api.execute({ id: result.id, user: wallet.address, slippageBps });
+        hash = res.txHash;
+      } else {
+        const { client, address } = await wallet.getClient();
+        const amount = interp.amountIsPercent
+          ? resolveConcreteAmount(interp, balances ?? (await walletBalances(address)))
+          : interp.amount;
+
+        if (isLimit) {
+          const order = buildLimitOrder(interp, amount, ethUsd, slippageBps);
+          hash = await copilotLimitOrder(client, address, order);
+        } else {
+          const prep = await api.prepareSwap({
+            id: result.id,
+            from: interp.tokenIn as "USDC" | "WETH",
+            to: interp.tokenOut as "USDC" | "WETH",
+            amount,
+            slippageBps,
+          });
+          hash = await copilotSwap(client, address, {
+            router: prep.router,
+            tokenIn: prep.tokenIn,
+            amountInRaw: prep.amountInRaw,
+            tokenOut: prep.tokenOut,
+            minAmountOutRaw: prep.minAmountOutRaw,
+          });
+        }
+        await api.confirmSwap(result.id, hash);
+      }
+
+      toast.dismiss(pending);
+      setTxHash(hash);
+      setState("done");
+      toast.success(
+        isLimit ? "Order is resting on-chain" : "Trade landed",
+        isLimit ? "Roque will fill it the moment your price prints." : "Settled on Sepolia.",
+        { href: `${EXPLORER}${hash}` },
+      );
+      onSettled?.();
+    } catch (err) {
+      toast.dismiss(pending);
+      setState("failed");
+      const message = (err as Error).message || "That did not go through.";
+      if (isRejection(message)) {
+        toast.info("No worries, waved off", "You turned that signature down. Nothing was sent.");
+      } else {
+        toast.error("That trade did not go through", message);
+      }
+    }
+  };
+  const preview = concretePreview();
+  const outLabel = interp.tokenOut;
+  const inLabel = interp.tokenIn;
+
+  const actionLabel = (): string => {
+    if (state === "done") return isLimit ? "Order placed" : "Trade done";
+    if (mode === "autonomous") return isLimit ? "Let Roque rest this order" : "Let Roque trade this";
+    if (!wallet.connected) return "Connect to sign";
+    return isLimit ? "Place this order" : "Sign and swap";
+  };
+
+  const disabled =
+    state === "working" ||
+    state === "done" ||
+    (mode === "autonomous" && !canAutonomous) ||
+    (interp.amountIsPercent && !preview && wallet.connected);
+
+  return (
+    <div className="intent-card animate-rise">
+      <div className="intent-head">
+        <span className={`intent-kind intent-kind-${isLimit ? "limit" : "swap"}`}>
+          {isLimit ? <TrendingUp size={13} /> : <Sparkles size={13} />}
+          {isLimit ? "Limit order" : "Market swap"}
+        </span>
+        <span className={`intent-confidence conf-${interp.confidence}`}>
+          {interp.confidence} confidence
+        </span>
+      </div>
+
+      <div className="intent-flow">
+        <div className="intent-leg">
+          <TokenIcon symbol={inLabel} size={30} />
+          <div className="intent-leg-text">
+            <span className="intent-leg-amount tabular">
+              {preview ? formatAmount(preview) : interp.amountIsPercent ? `${interp.amount}%` : formatAmount(interp.amount)}
+            </span>
+            <span className="intent-leg-symbol">{inLabel}</span>
+          </div>
+        </div>
+
+        <div className="intent-arrow">
+          <ArrowRight size={20} />
+        </div>
+
+        <div className="intent-leg intent-leg-out">
+          <TokenIcon symbol={outLabel} size={30} />
+          <div className="intent-leg-text">
+            <span className="intent-leg-amount tabular">
+              {quote ? formatAmount(quote.amountOut) : "market"}
+            </span>
+            <span className="intent-leg-symbol">{outLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      {isLimit ? (
+        <div className="intent-trigger">
+          {interp.triggerAbove ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+          <span>
+            Fires when ETH is {interp.triggerAbove ? "at or above" : "at or below"}{" "}
+            <strong className="tabular">${formatPrice(Number(interp.triggerPrice) || ethUsd)}</strong>
+          </span>
+        </div>
+      ) : quote ? (
+        <div className="intent-quote">
+          <span className="intent-quote-cell">
+            <span className="intent-quote-label">Rate</span>
+            <span className="tabular">1 WETH = ${formatPrice(quote.price)}</span>
+          </span>
+          <span className="intent-quote-divider" />
+          <span className="intent-quote-cell">
+            <span className="intent-quote-label">Notional</span>
+            <span className="tabular">{formatUsd(quote.usdValue)}</span>
+          </span>
+          <span className="intent-quote-divider" />
+          <span className="intent-quote-cell">
+            <span className="intent-quote-label">Max slippage</span>
+            <span className="tabular">{(slippageBps / 100).toFixed(2)}%</span>
+          </span>
+        </div>
+      ) : null}
+
+      {interp.reason ? <p className="intent-reason">{interp.reason}</p> : null}
+
+      {mode === "autonomous" && !canAutonomous ? (
+        <div className="intent-guard">
+          <ShieldCheck size={14} />
+          Grant Roque a capability first, then it can sign this for you.
+        </div>
+      ) : null}
+
+      <div className="intent-foot">
+        {state === "done" && txHash ? (
+          <a
+            className="intent-tx"
+            href={`${EXPLORER}${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View on Etherscan
+            <ArrowRight size={14} />
+          </a>
+        ) : (
+          <span className="intent-mode-note">
+            {mode === "autonomous"
+              ? "Roque signs this within your limits"
+              : "You sign this from your own wallet"}
+          </span>
+        )}
+        <button
+          className={`btn ${state === "done" ? "btn-ghost" : "btn-primary"} intent-action`}
+          onClick={run}
+          disabled={disabled}
+        >
+          {state === "working" ? <span className="spinner" /> : null}
+          {actionLabel()}
+        </button>
+      </div>
+    </div>
+  );
+}
