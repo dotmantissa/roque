@@ -116,6 +116,21 @@ export interface ActivityResult {
   trades: TradeRow[];
 }
 
+/** How far a card's on-chain action has got. Persisted with the turn so a signed,
+ * settled trade can never present itself as signable again after a remount. */
+export type SettleState = "idle" | "working" | "done" | "failed";
+
+/** One turn of a mode's conversation, as the app keeps it in memory and storage. */
+export interface ChatTurn {
+  id: number;
+  command: string;
+  result?: InterpretResult;
+  error?: string;
+  pending: boolean;
+  settleState: SettleState;
+  txHash: string | null;
+}
+
 export interface AgentInfo {
   agentSigner: `0x${string}`;
 }

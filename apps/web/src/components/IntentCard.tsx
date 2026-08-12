@@ -10,9 +10,8 @@
  * too, as a plain, unbothered refusal rather than a dead end.
  */
 
-import { useState } from "react";
 import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash } from "lucide-react";
-import type { InterpretResult, Mode } from "@/lib/types";
+import type { InterpretResult, Mode, SettleState } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
 import { api } from "@/lib/api";
@@ -20,8 +19,6 @@ import { walletBalances, copilotSwap, copilotLimitOrder } from "@/lib/chain";
 import { resolveConcreteAmount, buildLimitOrder } from "@/lib/orders";
 import { formatAmount, formatUsd, formatPrice } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
-
-type CardState = "idle" | "working" | "done" | "failed";
 
 const EXPLORER = "https://sepolia.etherscan.io/tx/";
 
@@ -37,6 +34,9 @@ export function IntentCard({
   prices,
   canAutonomous,
   slippageBps,
+  settleState,
+  txHash,
+  onSettle,
   onSettled,
 }: {
   result: InterpretResult;
@@ -46,12 +46,17 @@ export function IntentCard({
   prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
+  settleState: SettleState;
+  txHash: string | null;
+  onSettle: (patch: { settleState?: SettleState; txHash?: string | null }) => void;
   onSettled?: () => void;
 }) {
   const wallet = useWallet();
   const toast = useToast();
-  const [state, setState] = useState<CardState>("idle");
-  const [txHash, setTxHash] = useState<string | null>(null);
+  // How far this card has got is owned by the turn in shared app data, not by
+  // local state, so a trade that already settled stays settled after the route
+  // unmounts and mounts again. This card reads it and reports transitions up.
+  const state = settleState;
 
   const interp = result.interpretation;
   const quote = result.quote;
@@ -87,7 +92,7 @@ export function IntentCard({
       wallet.login();
       return;
     }
-    setState("working");
+    onSettle({ settleState: "working" });
     const pending = toast.push({
       kind: "pending",
       title: mode === "autonomous" ? "Roque is on it" : "Waiting on your wallet",
@@ -132,8 +137,7 @@ export function IntentCard({
       }
 
       toast.dismiss(pending);
-      setTxHash(hash);
-      setState("done");
+      onSettle({ settleState: "done", txHash: hash });
       toast.success(
         isLimit ? "Order is resting on-chain" : "Trade landed",
         isLimit ? "Roque will fill it the moment your price prints." : "Settled on Sepolia.",
@@ -142,7 +146,7 @@ export function IntentCard({
       onSettled?.();
     } catch (err) {
       toast.dismiss(pending);
-      setState("failed");
+      onSettle({ settleState: "failed" });
       const message = (err as Error).message || "That did not go through.";
       if (isRejection(message)) {
         toast.info("No worries, waved off", "You turned that signature down. Nothing was sent.");

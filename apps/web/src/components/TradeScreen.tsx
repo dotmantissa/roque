@@ -25,11 +25,6 @@ const SLIPPAGE_PRESETS = [
   { bps: 200, label: "2%" },
 ];
 
-const CHAT_KEYS: Record<Mode, string> = {
-  copilot: "roque-chat-copilot",
-  autonomous: "roque-chat-autonomous",
-};
-
 const COPY: Record<Mode, { title: string; sub: string }> = {
   copilot: {
     title: "You call it, you sign it",
@@ -91,7 +86,6 @@ export function TradeScreen({ mode }: { mode: Mode }) {
         <div className="workbench-main">
           <CommandConsole
             mode={mode}
-            storageKey={CHAT_KEYS[mode]}
             ethUsd={ethUsd}
             balances={balances.data}
             prices={prices}

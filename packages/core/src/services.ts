@@ -353,7 +353,7 @@ export async function intentHistory(user: string, limit = 25) {
   return q(
     `SELECT id, mode, command, status, kind, token_in, token_out, amount,
             reason, error, tx_hash, created_at
-       FROM intents WHERE user_address=$1 ORDER BY created_at DESC LIMIT $2`,
+       FROM intents WHERE LOWER(user_address)=LOWER($1) ORDER BY created_at DESC LIMIT $2`,
     [user, limit],
   );
 }
@@ -363,7 +363,7 @@ export async function tradeHistory(user: string, limit = 25) {
   return q(
     `SELECT kind, token_in, token_out, amount_in, amount_out, usd_value,
             order_id, price, tx_hash, block_number, block_time
-       FROM trades WHERE user_address=$1 ORDER BY block_number DESC LIMIT $2`,
+       FROM trades WHERE LOWER(user_address)=LOWER($1) ORDER BY block_number DESC LIMIT $2`,
     [user, limit],
   );
 }

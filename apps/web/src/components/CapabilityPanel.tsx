@@ -80,7 +80,7 @@ export function CapabilityPanel({
       const { client, address } = await wallet.getClient();
       const validUntil = now + days * 86400;
       const maxSlippageBps = Math.round(Number(slippage) * 100);
-      const { signature } = await signGrant(client, address, {
+      const { signature, message } = await signGrant(client, address, {
         maxPerTradeUsd: perTrade,
         maxDailyUsd: daily,
         maxSlippageBps,
@@ -94,13 +94,18 @@ export function CapabilityPanel({
         title: "Putting it on-chain",
         detail: "Roque is relaying your signed permission to Sepolia.",
       });
+      // The relayer submits these values verbatim and the executor rehashes the
+      // Grant struct over them to recover the signer, so they MUST be byte for
+      // byte what was signed. signGrant already scaled the dollar caps to 1e18;
+      // send those scaled strings back, never the raw "250" the field held, or
+      // the recovered signer will not match and the grant reverts.
       const { txHash } = await api.grant({
         user: address,
         agentSigner,
-        maxPerTradeUsd: perTrade,
-        maxDailyUsd: daily,
-        maxSlippageBps: String(maxSlippageBps),
-        validUntil: String(validUntil),
+        maxPerTradeUsd: message.maxPerTradeUsd,
+        maxDailyUsd: message.maxDailyUsd,
+        maxSlippageBps: message.maxSlippageBps,
+        validUntil: message.validUntil,
         signature,
       });
       toast.dismiss(relaying);

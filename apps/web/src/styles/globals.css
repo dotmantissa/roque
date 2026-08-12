@@ -1467,3 +1467,110 @@ h1, h2, h3, h4 {
   .console { height: min(76vh, 640px); }
   .landing { padding: 0 16px; }
 }
+
+/* ── Activity rows as jump buttons ─────────────────────────────── */
+
+/* Every row in the rail is a button now: clicking it scrolls the matching turn
+   into view in chat. The global button reset drops border and background but
+   leaves colour and alignment, so pin those back to how the old div read. The
+   explorer link stays a separate sibling anchor, so it is never caught by this. */
+.feed-row-btn {
+  color: inherit;
+  text-align: left;
+  font-size: inherit;
+}
+
+/* In the narrow rail the title and the two-way switch cannot share one row
+   without the tabs spilling past the edge, which is the "flowing out" the
+   redesign flagged. Stack them, and let the switch fill the width with its two
+   tabs sharing the space evenly. */
+.feed .panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
+.feed .feed-tabs { display: flex; width: 100%; }
+.feed .feed-tab { flex: 1; justify-content: center; }
+
+/* ── Jump to latest ────────────────────────────────────────────── */
+
+/* When the reader has scrolled up, or an activity jump parked them high in the
+   thread, this rides just above the input to carry them back to the present.
+   The console is the positioning context; the button is the one round thing in
+   a square app, which is the allowed exception to the sharp-edge rule. */
+.console { position: relative; }
+.console-jump {
+  position: absolute;
+  right: 20px;
+  bottom: 88px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+.console-jump:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* A turn the rail sent us to gets a brief ring so the eye lands on it, then it
+   fades back so nothing stays loud. Outline, not padding, so no layout shifts. */
+.turn-highlight { animation: turn-flash 2s ease both; }
+@keyframes turn-flash {
+  0% { outline: 2px solid var(--accent); outline-offset: 4px; background: var(--accent-soft); }
+  70% { outline: 2px solid var(--accent); outline-offset: 4px; background: var(--accent-soft); }
+  100% { outline-color: transparent; outline-offset: 4px; background: transparent; }
+}
+
+/* ── Confirm-before-clear modal ────────────────────────────────── */
+
+/* A destructive action gets a deliberate pause. The overlay carries no click
+   handler of its own, so tapping the dark does nothing: the only ways out are
+   No, Yes, or the X, exactly as asked. It renders as a sibling of the console,
+   so the console's own overflow:hidden can never clip it. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(4px);
+  animation: fade 0.2s ease both;
+}
+.modal-dialog {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 26px 24px 22px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+.modal-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-faint);
+}
+.modal-x:hover { background: var(--surface-2); color: var(--text); }
+.modal-title { font-size: 1.12rem; font-weight: 620; margin-bottom: 10px; padding-right: 28px; }
+.modal-body { font-size: 0.94rem; line-height: 1.55; color: var(--text-dim); margin-bottom: 22px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+.btn-danger {
+  background: var(--negative);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--negative) 88%, #000);
+  box-shadow: var(--shadow-md);
+}

@@ -12,6 +12,7 @@ import { useState } from "react";
 import { MessageSquare, Receipt, ExternalLink } from "lucide-react";
 import { tokenByAddress } from "@roque/shared";
 import type { ActivityResult, IntentRow, TradeRow } from "@/lib/types";
+import { useAppData } from "@/providers/AppData";
 import { formatAmount, timeAgo, shorten } from "@/lib/format";
 
 const EXPLORER_TX = "https://sepolia.etherscan.io/tx/";
@@ -44,6 +45,7 @@ export function ActivityFeed({
   loading: boolean;
 }) {
   const [tab, setTab] = useState<"intents" | "trades">("intents");
+  const { focusActivity } = useAppData();
 
   const intents = activity?.intents ?? [];
   const trades = activity?.trades ?? [];
@@ -84,7 +86,11 @@ export function ActivityFeed({
             <ul className="feed-list">
               {intents.map((row: IntentRow) => (
                 <li key={row.id} className="feed-row animate-fade">
-                  <div className="feed-row-main">
+                  <button
+                    className="feed-row-main feed-row-btn"
+                    onClick={() => focusActivity({ intentId: row.id })}
+                    title="Jump to this message in chat"
+                  >
                     <span className="feed-command">{row.command}</span>
                     <span className="feed-meta">
                       <span className={`feed-status ${STATUS_TONE[row.status] ?? "tone-neutral"}`}>
@@ -92,7 +98,7 @@ export function ActivityFeed({
                       </span>
                       <span className="feed-time">{timeAgo(row.created_at)}</span>
                     </span>
-                  </div>
+                  </button>
                   {row.tx_hash ? (
                     <a
                       className="feed-link"
@@ -114,7 +120,11 @@ export function ActivityFeed({
           <ul className="feed-list">
             {trades.map((row: TradeRow, i: number) => (
               <li key={`${row.tx_hash}-${i}`} className="feed-row animate-fade">
-                <div className="feed-row-main">
+                <button
+                  className="feed-row-main feed-row-btn"
+                  onClick={() => focusActivity({ txHash: row.tx_hash })}
+                  title="Jump to this trade in chat"
+                >
                   <span className="feed-trade">
                     <span className="feed-trade-kind">{TRADE_LABEL[row.kind] ?? row.kind}</span>
                     <span className="feed-trade-legs tabular">
@@ -130,7 +140,7 @@ export function ActivityFeed({
                   <span className="feed-time">
                     {row.block_time ? timeAgo(Number(row.block_time) * 1000) : `block ${row.block_number}`}
                   </span>
-                </div>
+                </button>
                 <a
                   className="feed-link"
                   href={`${EXPLORER_TX}${row.tx_hash}`}

@@ -15,7 +15,6 @@ import {
   createWalletClient,
   custom,
   http,
-  maxUint256,
   parseUnits,
   type Abi,
   type Account,
@@ -197,7 +196,13 @@ export async function claimAllFaucets(
 
 // ── Writes ──────────────────────────────────────────────────────
 
-/** Approve `spender` for `amount` of `token` if the current allowance is short. */
+/**
+ * Approve `spender` for exactly `amount` of `token` when the current allowance is
+ * short. Never an unlimited approval: the wallet only ever grants the precise
+ * amount this one action needs, so a stale allowance can't be drained later. The
+ * test tokens are OpenZeppelin ERC20s, so approve() overwrites the old value
+ * outright and no reset-to-zero dance is required.
+ */
 async function approveIfNeeded(
   wallet: WalletClient,
   user: `0x${string}`,
@@ -213,7 +218,7 @@ async function approveIfNeeded(
     address: token,
     abi: erc20,
     functionName: "approve",
-    args: [spender, maxUint256],
+    args: [spender, amount],
   });
   await publicClient.waitForTransactionReceipt({ hash });
 }
