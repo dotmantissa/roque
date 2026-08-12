@@ -28,7 +28,7 @@ export function WalletButton() {
   }, []);
 
   if (!ready) {
-    return <div className="skeleton" style={{ width: 132, height: 40, borderRadius: 12 }} />;
+    return <div className="skeleton" style={{ width: 132, height: 40 }} />;
   }
 
   if (!connected || !address) {

@@ -74,7 +74,7 @@ export function ActivityFeed({
         {loading && !activity ? (
           <div className="feed-loading">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="skeleton" style={{ height: 44, borderRadius: 10 }} />
+              <div key={i} className="skeleton" style={{ height: 44 }} />
             ))}
           </div>
         ) : tab === "intents" ? (

@@ -6,10 +6,15 @@
  * turn. The turn shows your words, a beat of the agent thinking, then the
  * structured intent as an IntentCard. Nothing here decides anything on its own;
  * it interprets and quotes, and the card is where a signature happens.
+ *
+ * Copilot and autonomous each get their own console with its own memory. The
+ * conversation is kept in local storage under a key the page hands in, so it is
+ * still here when you come back, and the two modes never bleed into each other.
+ * The clear button wipes only the mode you are looking at.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Wand2 } from "lucide-react";
+import { ArrowUp, Wand2, Trash2 } from "lucide-react";
 import type { InterpretResult, Mode } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { api } from "@/lib/api";
@@ -31,10 +36,23 @@ const SUGGESTIONS = [
   "Sell half my WETH if ETH hits 4,200",
 ];
 
-let turnSeq = 0;
+// Only the finished turns are worth keeping; a pending one has nothing to show on
+// a reload and would just hang a spinner forever.
+function loadTurns(key: string): Turn[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Turn[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((t) => t && typeof t.command === "string" && !t.pending);
+  } catch {
+    return [];
+  }
+}
 
 export function CommandConsole({
   mode,
+  storageKey,
   ethUsd,
   balances,
   prices,
@@ -43,6 +61,7 @@ export function CommandConsole({
   onSettled,
 }: {
   mode: Mode;
+  storageKey: string;
   ethUsd: number;
   balances: Record<string, number> | null;
   prices: Record<string, number>;
@@ -54,8 +73,31 @@ export function CommandConsole({
   const [value, setValue] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const seqRef = useRef(0);
   const streamRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Pull this mode's saved conversation in on mount, and seed the id counter past
+  // whatever was restored so a fresh turn can never collide with an old one.
+  useEffect(() => {
+    const restored = loadTurns(storageKey);
+    setTurns(restored);
+    seqRef.current = restored.reduce((max, t) => Math.max(max, t.id), 0);
+    setHydrated(true);
+  }, [storageKey]);
+
+  // Persist the finished turns whenever they settle. We wait for hydration so the
+  // first render does not stomp saved history with an empty list.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const keep = turns.filter((t) => !t.pending);
+      window.localStorage.setItem(storageKey, JSON.stringify(keep));
+    } catch {
+      // Storage full or blocked; the conversation just will not survive a reload.
+    }
+  }, [turns, hydrated, storageKey]);
 
   // Keep the newest turn in view as the conversation grows.
   useEffect(() => {
@@ -68,7 +110,7 @@ export function CommandConsole({
     setBusy(true);
     setValue("");
 
-    const id = ++turnSeq;
+    const id = ++seqRef.current;
     setTurns((list) => [...list, { id, command, pending: true }]);
 
     try {
@@ -88,6 +130,16 @@ export function CommandConsole({
     }
   };
 
+  const clearHistory = () => {
+    setTurns([]);
+    seqRef.current = 0;
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // Nothing to do; the next save will overwrite it anyway.
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -99,6 +151,16 @@ export function CommandConsole({
 
   return (
     <div className="console card">
+      {!empty ? (
+        <div className="console-head">
+          <span className="console-head-label">Conversation</span>
+          <button className="console-clear" onClick={clearHistory} title="Clear this conversation">
+            <Trash2 size={14} />
+            Clear history
+          </button>
+        </div>
+      ) : null}
+
       <div className="console-stream" ref={streamRef}>
         {empty ? (
           <div className="console-empty animate-fade">
