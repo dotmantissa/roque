@@ -126,7 +126,11 @@ export function IntentCard({
       let hash: string;
 
       if (mode === "autonomous") {
-        const res = await api.execute({ id: result.id, user: wallet.address, slippageBps });
+        const { client } = await wallet.getClient();
+        const res = await api.execute(
+          { id: result.id, user: wallet.address, slippageBps },
+          client,
+        );
         hash = res.txHash;
       } else {
         const { client, address } = await wallet.getClient();

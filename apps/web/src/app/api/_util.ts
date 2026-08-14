@@ -36,3 +36,9 @@ export async function body(req: Request): Promise<unknown> {
     return {};
   }
 }
+
+/** Pull an opaque owner-session token from a standard Authorization header. */
+export function bearerToken(req: Request): string | undefined {
+  const match = req.headers.get("authorization")?.match(/^Bearer ([A-Za-z0-9_-]+)$/u);
+  return match?.[1];
+}

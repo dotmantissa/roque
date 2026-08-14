@@ -260,6 +260,14 @@ export async function executeAutonomous(params: {
   const record = rows[0];
   if (!record) throw new Error("No such intent.");
 
+  const storedOwner = String(record.user_address ?? "");
+  if (
+    record.mode !== "autonomous" ||
+    storedOwner.toLowerCase() !== params.user.toLowerCase()
+  ) {
+    throw new Error("That intent does not belong to this vault owner.");
+  }
+
   const interp = record.interpretation as Interpretation;
   if (!interp || !interp.ok) throw new Error("That intent is not something I can act on.");
 
@@ -294,6 +302,21 @@ export async function executeAutonomous(params: {
   );
   const now = Math.floor(Date.now() / 1000);
   const nonce = await freshNonce(params.user);
+
+  // Claim the persisted intent exactly once after all friendly pre-checks and
+  // immediately before constructing and signing it. The conditional update is
+  // the concurrency gate: two requests may do the reads above, but only one can
+  // move this record from ready to signed.
+  const claimed = await q<{ id: string }>(
+    `UPDATE intents SET status='signed', updated_at=now()
+       WHERE id=$1 AND LOWER(user_address)=LOWER($2)
+         AND mode='autonomous' AND status='ready'
+       RETURNING id`,
+    [params.id, params.user],
+  );
+  if (claimed.length !== 1) {
+    throw new Error("That intent has already been executed or is being processed.");
+  }
 
   if (interp.kind === "limit") {
     const price = interp.triggerPrice ? Number(interp.triggerPrice) : (await ethUsd()).usd;

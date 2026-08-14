@@ -88,6 +88,29 @@ CREATE TABLE IF NOT EXISTS intents (
 CREATE INDEX IF NOT EXISTS idx_intents_user ON intents (user_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_intents_status ON intents (status);
 
+-- One-time wallet challenges and their short-lived owner-bound sessions. The
+-- bearer token itself is never stored, only its SHA-256 hash.
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  id             TEXT PRIMARY KEY,
+  owner_address  TEXT NOT NULL,
+  nonce          TEXT NOT NULL,
+  message        TEXT NOT NULL,
+  expires_at     TIMESTAMPTZ NOT NULL,
+  consumed_at    TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry
+  ON auth_challenges (expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token_hash     TEXT PRIMARY KEY,
+  owner_address  TEXT NOT NULL,
+  expires_at     TIMESTAMPTZ NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_owner_expiry
+  ON auth_sessions (owner_address, expires_at DESC);
+
 -- A flat, queryable mirror of the on-chain trade history, filled by the indexer
 -- from AgentExecutor and OrderBook events. The chain remains the truth; this is
 -- just the fast, joinable copy the activity feed reads from.

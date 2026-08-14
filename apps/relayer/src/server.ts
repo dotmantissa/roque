@@ -11,6 +11,8 @@ import cors from "@fastify/cors";
 import { serverEnv } from "@roque/core/env";
 import {
   ApiError,
+  handleAuthChallenge,
+  handleAuthSession,
   handleInterpret,
   handleQuote,
   handlePrice,
@@ -51,8 +53,14 @@ app.setErrorHandler((err, _req, reply) => {
 app.get("/health", async () => handleHealth());
 app.get("/agent", async () => handleAgentInfo());
 
+// ── Wallet authentication ────────────────────────────────────
+app.post("/auth/challenge", async (req) => handleAuthChallenge(req.body));
+app.post("/auth/session", async (req) => handleAuthSession(req.body));
+
 // ── Judgment and market ───────────────────────────────────────
-app.post("/interpret", async (req) => handleInterpret(req.body));
+app.post("/interpret", async (req) =>
+  handleInterpret(req.body, bearerToken(req.headers.authorization)),
+);
 app.post("/quote", async (req) => handleQuote(req.body));
 app.post("/reserves", async (req) => handleReserves(req.body));
 app.get("/price", async () => handlePrice());
@@ -62,8 +70,12 @@ app.post("/swap/prepare", async (req) => handlePrepareSwap(req.body));
 app.post("/swap/confirm", async (req) => handleConfirmSwap(req.body));
 
 // ── Autonomous: grants and the executor ───────────────────────
-app.post("/grant", async (req) => handleGrant(req.body));
-app.post("/execute", async (req) => handleExecute(req.body));
+app.post("/grant", async (req) =>
+  handleGrant(req.body, bearerToken(req.headers.authorization)),
+);
+app.post("/execute", async (req) =>
+  handleExecute(req.body, bearerToken(req.headers.authorization)),
+);
 
 // ── Dashboard reads ───────────────────────────────────────────
 app.get<{ Params: { user: string } }>("/capability/:user", async (req) =>
@@ -90,6 +102,11 @@ function requireCron(provided: string | undefined, reply: import("fastify").Fast
     reply.status(401).send({ error: "Not authorised." });
     throw new Error("unauthorised cron");
   }
+}
+
+function bearerToken(header: string | undefined): string | undefined {
+  const match = header?.match(/^Bearer ([A-Za-z0-9_-]+)$/u);
+  return match?.[1];
 }
 
 const env = serverEnv();

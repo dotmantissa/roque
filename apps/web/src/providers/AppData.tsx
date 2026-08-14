@@ -244,7 +244,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       detail: "Direct execution: sending this to Sepolia now.",
     });
     try {
-      const res = await api.execute({ id: result.id, user, slippageBps: slippageRef.current });
+      const { client } = await wallet.getClient();
+      const res = await api.execute(
+        { id: result.id, user, slippageBps: slippageRef.current },
+        client,
+      );
       toast.dismiss(pending);
       settleTurn(mode, turnId, { settleState: "done", txHash: res.txHash });
       toast.success(
@@ -274,8 +278,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       ...c,
       [mode]: [...c[mode], { id, command, pending: true, settleState: "idle", txHash: null }],
     }));
-    api
-      .interpret(command, mode, address)
+    const interpretation =
+      mode === "autonomous"
+        ? wallet.getClient().then(({ client }) => api.interpret(command, mode, address, client))
+        : api.interpret(command, mode, address);
+    interpretation
       .then((result) => {
         // Fire on its own only when the person chose direct execution, the reading
         // is a trade Roque can act on, and a live capability stands behind it. Any
