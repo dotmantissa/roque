@@ -1,5 +1,4 @@
 "use client";
-
 /**
  * One turn of the conversation, made concrete. The interpreter has already read
  * the person's words into a structured intent; this card shows them exactly what
@@ -9,9 +8,8 @@
  * capability they granted. A trade the interpreter could not make shows up here
  * too, as a plain, unbothered refusal rather than a dead end.
  */
-
-import { useRef } from "react";
-import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash, Check, AlertTriangle } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash, Check, AlertTriangle, LineChart as ChartIcon } from "lucide-react";
 import type { InterpretResult, Mode, SettleState } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
@@ -20,6 +18,7 @@ import { walletBalances, copilotSwap, copilotLimitOrder } from "@/lib/chain";
 import { resolveConcreteAmount, buildLimitOrder } from "@/lib/orders";
 import { formatAmount, formatUsd, formatPrice } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
+import { ChartModal } from "./ChartModal";
 
 const EXPLORER = "https://sepolia.etherscan.io/tx/";
 
@@ -54,19 +53,14 @@ export function IntentCard({
 }) {
   const wallet = useWallet();
   const toast = useToast();
-  // How far this card has got is owned by the turn in shared app data, not by
-  // local state, so a trade that already settled stays settled after the route
-  // unmounts and mounts again. This card reads it and reports transitions up.
   const state = settleState;
-  // A synchronous latch so a double click in the same tick cannot fire two
-  // signatures before the state flips to "working" and the button goes away.
   const runningRef = useRef(false);
+  const [chartOpen, setChartOpen] = useState(false);
 
   const interp = result.interpretation;
   const quote = result.quote;
   const isLimit = interp.kind === "limit";
 
-  // A refusal, or a command that did not read as a trade. No action, no drama.
   if (!interp.ok || interp.kind === "unknown") {
     return (
       <div className="intent-card intent-card-refused animate-rise">
@@ -80,7 +74,6 @@ export function IntentCard({
       </div>
     );
   }
-
   const concretePreview = (): string | null => {
     if (!interp.amountIsPercent) return interp.amount;
     if (!balances) return null;
@@ -96,9 +89,6 @@ export function IntentCard({
       wallet.login();
       return;
     }
-    // Only ever from a standing start. Once it is working, done, or failed the
-    // action is spent; the card shows a status instead of a button, and this
-    // latch guards the sliver of time before that first render lands.
     if (runningRef.current || state !== "idle") return;
     runningRef.current = true;
     onSettle({ settleState: "working" });
@@ -157,13 +147,9 @@ export function IntentCard({
       toast.dismiss(pending);
       const message = (err as Error).message || "That did not go through.";
       if (isRejection(message)) {
-        // A wallet rejection is not a signature: nothing was sent, so the trade
-        // is still on offer. Fall back to idle so it can be signed once, later.
         onSettle({ settleState: "idle" });
         toast.info("No worries, waved off", "You turned that signature down. Nothing was sent.");
       } else {
-        // A real failure after submitting is terminal; the card will not offer
-        // to sign the same intent a second time.
         onSettle({ settleState: "failed" });
         toast.error("That trade did not go through", message);
       }
@@ -187,8 +173,6 @@ export function IntentCard({
     return "Didn't go through";
   };
 
-  // The button only exists in the idle state; a percent trade still needs a
-  // resolvable base, and autonomous still needs a live capability.
   const idleDisabled =
     (mode === "autonomous" && !canAutonomous) ||
     (interp.amountIsPercent && !preview && wallet.connected);
@@ -203,6 +187,10 @@ export function IntentCard({
         <span className={`intent-confidence conf-${interp.confidence}`}>
           {interp.confidence} confidence
         </span>
+        <button className="intent-chart-btn" onClick={() => setChartOpen(true)}>
+          <ChartIcon size={13} />
+          View Chart
+        </button>
       </div>
 
       <div className="intent-flow">
@@ -269,12 +257,12 @@ export function IntentCard({
 
       <div className="intent-foot">
         {state === "done" && txHash ? (
-          <a
-            className="intent-tx"
-            href={`${EXPLORER}${txHash}`}
-            target="_blank"
-            rel="noreferrer"
-          >
+    <a
+      className="intent-tx"
+      href={`${EXPLORER}${txHash}`}
+      target="_blank"
+      rel="noreferrer"
+    >
             View on Etherscan
             <ArrowRight size={14} />
           </a>
@@ -298,6 +286,15 @@ export function IntentCard({
           </span>
         )}
       </div>
+
+      {chartOpen ? (
+        <ChartModal
+          pair={`${inLabel}/${outLabel}`}
+          price={quote?.price ?? ethUsd}
+          usdPrice={outLabel === "rWETH" || inLabel === "rWETH" ? ethUsd : (prices[outLabel] ?? undefined)}
+          onClose={() => setChartOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1746,7 +1746,7 @@ h1, h2, h3, h4 {
   background: var(--surface-raised);
   color: var(--accent);
   border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 .console-jump:hover {
   background: var(--accent);
@@ -1811,4 +1811,126 @@ h1, h2, h3, h4 {
 .btn-danger:hover {
   background: color-mix(in srgb, var(--negative) 88%, #000);
   box-shadow: var(--shadow-md);
+}
+/* Chart modal */
+.chart-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 20px;
+}
+
+.chart-modal {
+  background: #16161c;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 700px;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+}
+
+.chart-modal-fullscreen {
+  max-width: 100%;
+  height: 100%;
+}
+
+.chart-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.chart-modal-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.chart-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-modal-tf {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.chart-modal-tf.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #ffffff;
+}
+
+.chart-modal-icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+}
+
+.chart-modal-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.chart-modal-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-modal-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+}
+/* Chart button inside IntentCard */
+.intent-chart-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #6366f1;
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.intent-chart-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+.chart-modal-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.chart-modal-usd {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
 }

@@ -31,6 +31,7 @@ import {
 } from "./intents.js";
 import { keeperTick } from "./keeper.js";
 import { indexToHead } from "./indexer.js";
+import { q as dbQuery } from "./db/index.js";
 
 /** An error carrying the HTTP status the transport should answer with. */
 export class ApiError extends Error {
@@ -317,5 +318,40 @@ export function handleHealth() {
     },
     tokens: Object.fromEntries(tokenList.map((t) => [t.symbol, t.address])),
     agentSigner: agentSignerAddress(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Price history: a lightweight, self-building record for the chart
+// ─────────────────────────────────────────────────────────────
+
+const recordPriceSchema = z.object({ pair: z.string().min(1), price: z.number().positive() });
+
+export async function handleRecordPrice(body: unknown) {
+  const input = parse(recordPriceSchema, body);
+  await dbQuery(`INSERT INTO price_history (pair, price) VALUES ($1, $2)`, [input.pair, input.price]);
+  return { ok: true };
+}
+
+const priceHistorySchema = z.object({
+  pair: z.string().min(1),
+  hours: z.number().positive().max(168).default(24),
+});
+
+export async function handlePriceHistory(searchParams: URLSearchParams) {
+  const input = parse(priceHistorySchema, {
+    pair: searchParams.get("pair"),
+    hours: searchParams.get("hours") ? Number(searchParams.get("hours")) : undefined,
+  });
+  const rows = await dbQuery<{ price: string; recorded_at: string }>(
+    `SELECT price, recorded_at FROM price_history
+     WHERE pair = $1 AND recorded_at >= now() - ($2 || ' hours')::interval
+     ORDER BY recorded_at ASC
+     LIMIT 2000`,
+    [input.pair, input.hours],
+  );
+  return {
+    pair: input.pair,
+    points: rows.map((r) => ({ t: new Date(r.recorded_at).getTime(), price: Number(r.price) })),
   };
 }
