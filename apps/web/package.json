@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@privy-io/react-auth": "^1.90.1",
+    "@privy-io/react-auth": "^3.37.0",
     "@roque/core": "workspace:*",
     "@roque/shared": "workspace:*",
     "lucide-react": "^0.469.0",
