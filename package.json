@@ -11,7 +11,9 @@
     "relayer": "pnpm --filter @roque/relayer dev",
     "keeper": "pnpm --filter @roque/relayer keeper",
     "build:web": "pnpm --filter @roque/web build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @roque/core test",
+    "check": "pnpm typecheck && pnpm test && pnpm build:web"
   },
   "packageManager": "pnpm@11.2.2"
 }
