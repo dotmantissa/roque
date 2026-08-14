@@ -4,13 +4,13 @@ packages:
 minimumReleaseAgeExclude:
   - viem@2.55.13
 # None of these dependency build scripts are needed to build or run the web
-# app, so pnpm skips them on purpose. Listing them keeps CI installs quiet
-# instead of failing on unapproved builds.
-ignoredBuiltDependencies:
-  - "@reown/appkit"
-  - bufferutil
-  - es5-ext
-  - esbuild
-  - keccak
-  - sharp
-  - utf-8-validate
+# app, so pnpm skips them on purpose. Explicit false entries satisfy pnpm 11's
+# strict dependency-build policy without executing unnecessary install scripts.
+allowBuilds:
+  "@reown/appkit": false
+  bufferutil: false
+  es5-ext: false
+  esbuild: false
+  keccak: false
+  sharp: false
+  utf-8-validate: false

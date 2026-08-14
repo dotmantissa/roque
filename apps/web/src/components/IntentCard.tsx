@@ -9,9 +9,18 @@
  * capability they granted. A trade the interpreter could not make shows up here
  * too, as a plain, unbothered refusal rather than a dead end.
  */
-
-import { useRef } from "react";
-import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash, Check, AlertTriangle } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CircleSlash,
+  LineChart,
+  ShieldCheck,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import type { InterpretResult, Mode, SettleState } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
@@ -20,6 +29,7 @@ import { walletBalances, copilotSwap, copilotLimitOrder } from "@/lib/chain";
 import { resolveConcreteAmount, buildLimitOrder } from "@/lib/orders";
 import { formatAmount, formatUsd, formatPrice } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
+import { ChartModal } from "./ChartModal";
 
 const EXPLORER = "https://sepolia.etherscan.io/tx/";
 
@@ -61,6 +71,7 @@ export function IntentCard({
   // A synchronous latch so a double click in the same tick cannot fire two
   // signatures before the state flips to "working" and the button goes away.
   const runningRef = useRef(false);
+  const [chartOpen, setChartOpen] = useState(false);
 
   const interp = result.interpretation;
   const quote = result.quote;
@@ -174,6 +185,7 @@ export function IntentCard({
   const preview = concretePreview();
   const outLabel = interp.tokenOut;
   const inLabel = interp.tokenIn;
+  const chartPrice = prices[outLabel] ?? (outLabel === "rWETH" ? ethUsd : undefined);
 
   const actionLabel = (): string => {
     if (mode === "autonomous") return isLimit ? "Let Roque rest this order" : "Let Roque trade this";
@@ -203,6 +215,17 @@ export function IntentCard({
         <span className={`intent-confidence conf-${interp.confidence}`}>
           {interp.confidence} confidence
         </span>
+        {chartPrice && chartPrice > 0 ? (
+          <button
+            type="button"
+            className="intent-chart-btn"
+            onClick={() => setChartOpen(true)}
+            aria-label={`View ${outLabel} USD price chart`}
+          >
+            <LineChart size={13} />
+            View Chart
+          </button>
+        ) : null}
       </div>
 
       <div className="intent-flow">
@@ -298,6 +321,14 @@ export function IntentCard({
           </span>
         )}
       </div>
+
+      {chartOpen ? (
+        <ChartModal
+          pair={`${outLabel}/USD`}
+          price={chartPrice ?? 0}
+          onClose={() => setChartOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

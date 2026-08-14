@@ -1812,3 +1812,147 @@ h1, h2, h3, h4 {
   background: color-mix(in srgb, var(--negative) 88%, #000);
   box-shadow: var(--shadow-md);
 }
+/* Chart modal */
+.chart-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.64);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 20px;
+}
+
+.chart-modal {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 700px;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+}
+
+.chart-modal-fullscreen {
+  max-width: 100%;
+  height: 100%;
+}
+
+.chart-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.chart-modal-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.chart-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-modal-tf {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.chart-modal-tf.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.chart-modal-icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  border-radius: 4px;
+}
+
+.chart-modal-icon-btn:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chart-modal-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-modal-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+/* Chart button inside IntentCard */
+.intent-chart-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--accent);
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.intent-chart-btn:hover {
+  background: var(--accent-soft);
+}
+.chart-modal-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.chart-modal-usd {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 620px) {
+  .chart-modal-overlay {
+    padding: 10px;
+  }
+
+  .chart-modal {
+    height: min(460px, calc(100dvh - 20px));
+    padding: 14px;
+  }
+
+  .chart-modal-head {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .chart-modal-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

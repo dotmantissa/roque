@@ -112,6 +112,17 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE INDEX IF NOT EXISTS idx_trades_user ON trades (user_address, block_number DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_kind ON trades (kind);
 
+-- USD price observations used by the in-app charts. These are deliberately
+-- append-only; the read path limits each response to a bounded time window.
+CREATE TABLE IF NOT EXISTS price_history (
+  id             BIGSERIAL PRIMARY KEY,
+  pair           TEXT NOT NULL,
+  price          NUMERIC NOT NULL CHECK (price > 0),
+  recorded_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_price_history_pair_time
+  ON price_history (pair, recorded_at DESC);
+
 -- A tiny key/value store for the indexer's bookmark, so a restart resumes from
 -- the last block it fully processed instead of rescanning from genesis.
 CREATE TABLE IF NOT EXISTS indexer_state (

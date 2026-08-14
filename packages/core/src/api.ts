@@ -20,7 +20,7 @@ import {
 } from "./services.js";
 import { openOrders } from "./orders.js";
 import { quoteSwap, poolReserves } from "./quote.js";
-import { ethUsd, allTokenUsd } from "./prices.js";
+import { ethUsd, allTokenUsd, tokenUsd } from "./prices.js";
 import {
   submitGrant,
   getCapability,
@@ -31,6 +31,7 @@ import {
 } from "./intents.js";
 import { keeperTick } from "./keeper.js";
 import { indexToHead } from "./indexer.js";
+import { q as dbQuery } from "./db/index.js";
 
 /** An error carrying the HTTP status the transport should answer with. */
 export class ApiError extends Error {
@@ -317,5 +318,66 @@ export function handleHealth() {
     },
     tokens: Object.fromEntries(tokenList.map((t) => [t.symbol, t.address])),
     agentSigner: agentSignerAddress(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Price history: a lightweight, self-building record for the chart
+// ─────────────────────────────────────────────────────────────
+
+const pricePair = z.string().max(64).refine((value) => {
+  const [base, quote, extra] = value.split("/");
+  return (
+    typeof base === "string" &&
+    extra === undefined &&
+    quote === "USD" &&
+    tokenSymbols.includes(base)
+  );
+}, "That is not a supported USD price pair.");
+
+const recordPriceSchema = z.object({ pair: pricePair });
+
+export async function handleRecordPrice(body: unknown) {
+  const input = parse(recordPriceSchema, body);
+  const symbol = input.pair.split("/")[0]!;
+  const price = await tokenUsd(symbol);
+  await dbQuery(
+    `INSERT INTO price_history (pair, price)
+     SELECT $1, $2
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM price_history
+       WHERE pair = $1 AND recorded_at >= now() - interval '10 seconds'
+     )`,
+    [input.pair, price],
+  );
+  return { ok: true, price };
+}
+
+const priceHistorySchema = z.object({
+  pair: pricePair,
+  hours: z.union([z.literal(1), z.literal(24), z.literal(168)]).default(24),
+});
+
+export async function handlePriceHistory(searchParams: URLSearchParams) {
+  const input = parse(priceHistorySchema, {
+    pair: searchParams.get("pair"),
+    hours: searchParams.get("hours") ? Number(searchParams.get("hours")) : undefined,
+  });
+  const rows = await dbQuery<{ price: string; recorded_at: string }>(
+    `SELECT price, recorded_at
+     FROM (
+       SELECT price, recorded_at
+       FROM price_history
+       WHERE pair = $1 AND recorded_at >= now() - ($2 || ' hours')::interval
+       ORDER BY recorded_at DESC
+       LIMIT 2000
+     ) recent
+     ORDER BY recorded_at ASC`,
+    [input.pair, input.hours],
+  );
+  return {
+    pair: input.pair,
+    points: rows.map((r) => ({ t: new Date(r.recorded_at).getTime(), price: Number(r.price) })),
   };
 }
