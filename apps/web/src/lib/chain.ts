@@ -285,6 +285,30 @@ export async function copilotLimitOrder(
   return hash;
 }
 
+/**
+ * Cancel a resting limit order and reclaim its escrow, signed by the user. The
+ * OrderBook lets the owner cancel any of their own orders, and every order, whether
+ * a person opened it in copilot or the agent opened it in autonomous, belongs to
+ * the user, so one wallet-signed call covers both modes. Cancelling only ever
+ * returns escrow to the owner; it moves nothing outward and needs no approval.
+ */
+export async function cancelLimitOrder(
+  wallet: WalletClient,
+  user: `0x${string}`,
+  id: string,
+): Promise<Hex> {
+  const hash = await wallet.writeContract({
+    account: user as unknown as Account,
+    chain: sepolia,
+    address: addresses.orderBook,
+    abi: orderBook,
+    functionName: "cancelOrder",
+    args: [BigInt(id)],
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
 /** Move funds into the agent vault: approve the executor, then deposit. */
 export async function depositToVault(
   wallet: WalletClient,

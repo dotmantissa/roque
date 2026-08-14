@@ -25,7 +25,9 @@ import type {
   ActivityResult,
   CapabilityResult,
   ChatTurn,
+  InterpretResult,
   Mode,
+  OrdersResult,
   PriceResult,
   SettleState,
   VaultResult,
@@ -34,11 +36,19 @@ import { api } from "@/lib/api";
 import { walletBalances, faucetClaimsRemaining } from "@/lib/chain";
 import { usePoll, type PollState } from "@/lib/hooks";
 import { useWallet, type RoqueWallet } from "@/lib/useWallet";
+import { useToast } from "@/components/Toaster";
+
+const EXPLORER = "https://sepolia.etherscan.io/tx/";
 
 const CHAT_KEYS: Record<Mode, string> = {
   copilot: "roque-chat-copilot",
   autonomous: "roque-chat-autonomous",
 };
+
+// How autonomous acts on a reading. "confirm" leaves the trade on the card for a
+// tap; "direct" fires it the instant Roque understands the words, no tap at all.
+export type ExecMode = "confirm" | "direct";
+const EXEC_KEY = "roque-autonomous-exec";
 
 const MODES: Mode[] = ["copilot", "autonomous"];
 
@@ -55,11 +65,15 @@ interface AppDataValue {
   vault: PollState<VaultResult>;
   capability: PollState<CapabilityResult>;
   activity: PollState<ActivityResult>;
+  orders: PollState<OrdersResult>;
   ethUsd: number;
   prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
   setSlippageBps: (bps: number) => void;
+  // Autonomous only: whether a reading waits for a tap or fires on its own.
+  execMode: ExecMode;
+  setExecMode: (mode: ExecMode) => void;
   refreshAll: () => void;
   // Conversation, lifted so it survives a route change mid-request.
   conversations: Record<Mode, ChatTurn[]>;
@@ -79,7 +93,28 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const address = wallet.address;
   const router = useRouter();
   const pathname = usePathname();
+  const toast = useToast();
   const [slippageBps, setSlippageBps] = useState(100);
+  const [execMode, setExecModeState] = useState<ExecMode>("confirm");
+
+  // Restore the autonomous execution choice. It defaults to the safe one, so a
+  // fresh device never lands in direct execution without asking for it.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(EXEC_KEY) === "direct") setExecModeState("direct");
+    } catch {
+      // Blocked storage just means the choice does not survive a reload.
+    }
+  }, []);
+
+  const setExecMode = (mode: ExecMode) => {
+    setExecModeState(mode);
+    try {
+      window.localStorage.setItem(EXEC_KEY, mode);
+    } catch {
+      // See above; the toggle still works for this session.
+    }
+  };
 
   const price = usePoll(() => api.price(), 12_000, []);
   const agent = usePoll(() => api.agent(), 600_000, []);
@@ -88,6 +123,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const vault = usePoll(address ? () => api.vault(address) : null, 20_000, [address]);
   const capability = usePoll(address ? () => api.capability(address) : null, 20_000, [address]);
   const activity = usePoll(address ? () => api.activity(address) : null, 15_000, [address]);
+  const orders = usePoll(address ? () => api.orders(address) : null, 15_000, [address]);
 
   const ethUsd = price.data?.ethUsd ?? 0;
   const prices = price.data?.prices ?? {};
@@ -98,6 +134,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return (cap.validUntil ?? 0) > Math.floor(Date.now() / 1000);
   }, [capability.data]);
 
+  // Direct execution fires from inside an async continuation that outlives the
+  // render it was created in, so it must not close over stale values. These refs
+  // always hold the latest, and the continuation reads them at the moment it runs.
+  const execModeRef = useRef(execMode);
+  execModeRef.current = execMode;
+  const canAutoRef = useRef(canAutonomous);
+  canAutoRef.current = canAutonomous;
+  const slippageRef = useRef(slippageBps);
+  slippageRef.current = slippageBps;
+  const addressRef = useRef(address);
+  addressRef.current = address;
+
   // After anything that moves money or permission, pull the affected reads fresh
   // so every panel catches up without waiting on the next tick.
   const refreshAll = () => {
@@ -106,6 +154,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     vault.refresh();
     capability.refresh();
     activity.refresh();
+    orders.refresh();
   };
 
   // ── Conversation state ──────────────────────────────────────────
@@ -170,6 +219,52 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     }
   }, [conversations, chatHydrated]);
 
+  const settleTurn = (mode: Mode, turnId: number, patch: SettlePatch) => {
+    setConversations((c) => ({
+      ...c,
+      [mode]: c[mode].map((t) => (t.id === turnId ? { ...t, ...patch } : t)),
+    }));
+  };
+
+  // Direct execution: hand a fresh reading straight to the relayer, which signs
+  // it within the capability the person already granted. The turn is put into
+  // "working" the instant this runs, so the card shows Roque acting rather than a
+  // button to press, and the same done/failed states a hand-signed trade reaches.
+  // Only ever called for an autonomous turn that read as an executable trade with
+  // a live capability behind it; everything else stays a card the person taps.
+  const autoExecute = async (mode: Mode, turnId: number, result: InterpretResult) => {
+    const user = addressRef.current;
+    if (!user) {
+      settleTurn(mode, turnId, { settleState: "idle" });
+      return;
+    }
+    const pending = toast.push({
+      kind: "pending",
+      title: "Roque is on it",
+      detail: "Direct execution: sending this to Sepolia now.",
+    });
+    try {
+      const res = await api.execute({ id: result.id, user, slippageBps: slippageRef.current });
+      toast.dismiss(pending);
+      settleTurn(mode, turnId, { settleState: "done", txHash: res.txHash });
+      toast.success(
+        res.kind === "limit" ? "Order is resting on-chain" : "Trade landed",
+        res.kind === "limit"
+          ? "Roque will fill it the moment your price prints."
+          : "Settled on Sepolia.",
+        { href: `${EXPLORER}${res.txHash}` },
+      );
+      refreshAll();
+    } catch (err) {
+      toast.dismiss(pending);
+      settleTurn(mode, turnId, { settleState: "failed" });
+      toast.error(
+        "That trade did not go through",
+        (err as Error).message || "Roque could not complete it.",
+      );
+    }
+  };
+
   const sendCommand = (mode: Mode, raw: string) => {
     const command = raw.trim();
     if (!command || chatBusy[mode]) return;
@@ -181,12 +276,26 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     }));
     api
       .interpret(command, mode, address)
-      .then((result) =>
+      .then((result) => {
+        // Fire on its own only when the person chose direct execution, the reading
+        // is a trade Roque can act on, and a live capability stands behind it. Any
+        // gap there leaves the trade on the card as an ordinary confirm-first tap.
+        const direct =
+          mode === "autonomous" &&
+          execModeRef.current === "direct" &&
+          canAutoRef.current &&
+          result.interpretation.ok &&
+          result.interpretation.kind !== "unknown";
         setConversations((c) => ({
           ...c,
-          [mode]: c[mode].map((t) => (t.id === id ? { ...t, result, pending: false } : t)),
-        })),
-      )
+          [mode]: c[mode].map((t) =>
+            t.id === id
+              ? { ...t, result, pending: false, settleState: direct ? "working" : t.settleState }
+              : t,
+          ),
+        }));
+        if (direct) void autoExecute(mode, id, result);
+      })
       .catch((err: unknown) =>
         setConversations((c) => ({
           ...c,
@@ -205,13 +314,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // The persistence effect will write an empty list on the next tick anyway.
     }
-  };
-
-  const settleTurn = (mode: Mode, turnId: number, patch: SettlePatch) => {
-    setConversations((c) => ({
-      ...c,
-      [mode]: c[mode].map((t) => (t.id === turnId ? { ...t, ...patch } : t)),
-    }));
   };
 
   // Find the chat turn an activity row belongs to and ask its console to jump
@@ -245,11 +347,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     vault,
     capability,
     activity,
+    orders,
     ethUsd,
     prices,
     canAutonomous,
     slippageBps,
     setSlippageBps,
+    execMode,
+    setExecMode,
     refreshAll,
     conversations,
     chatBusy,

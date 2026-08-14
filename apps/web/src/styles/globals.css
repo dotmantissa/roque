@@ -79,10 +79,6 @@ html {
 
 body {
   background-color: var(--bg);
-  background-image:
-    linear-gradient(var(--bg-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-  background-size: 44px 44px;
   color: var(--text);
   font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   font-feature-settings: "cv11", "ss01";
@@ -561,6 +557,54 @@ h1, h2, h3, h4 {
   box-shadow: var(--shadow-sm);
 }
 
+/* Autonomous execution toggle: Confirm is ordinary, Direct wears a warning. */
+.trade-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.exec-mode { display: inline-flex; align-items: center; gap: 10px; }
+.exec-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+.seg-btn-danger.is-active {
+  color: var(--negative);
+  background: var(--negative-soft);
+}
+
+.exec-danger-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 11px 14px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--negative-soft);
+  border: 1px solid color-mix(in srgb, var(--negative) 30%, transparent);
+  border-left: 3px solid var(--negative);
+}
+.exec-danger-banner svg { color: var(--negative); flex-shrink: 0; }
+.exec-danger-banner strong { color: var(--negative); }
+
+.modal-danger-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  color: var(--negative);
+  background: var(--negative-soft);
+  border: 1px solid color-mix(in srgb, var(--negative) 30%, transparent);
+}
+
 /* ── Workbench layout ──────────────────────────────────────────── */
 
 .workbench {
@@ -870,6 +914,38 @@ h1, h2, h3, h4 {
 .intent-tx:hover { text-decoration: underline; }
 .intent-action { height: 42px; }
 
+/* Once a trade has been signed it stops being a button. It becomes this: a flat,
+   unclickable readout of where the on-chain action got to, coloured by outcome.
+   Same footprint as the button it replaces so the card does not jump. */
+.intent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  font-size: 0.9rem;
+  font-weight: 560;
+  white-space: nowrap;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+.intent-status-working {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.intent-status-done {
+  color: var(--positive);
+  background: var(--positive-soft);
+  border-color: color-mix(in srgb, var(--positive) 40%, transparent);
+}
+.intent-status-failed {
+  color: var(--negative);
+  background: var(--negative-soft);
+  border-color: color-mix(in srgb, var(--negative) 40%, transparent);
+}
+
 .intent-card-refused {
   display: flex;
   align-items: flex-start;
@@ -980,6 +1056,79 @@ h1, h2, h3, h4 {
 .vault-input:focus { border-color: var(--accent); background: var(--surface); }
 .vault-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .vault-btn { width: 100%; }
+
+/* Amount unit toggle: name the deposit in tokens or in dollars. */
+.vault-denom {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.vault-denom-btn {
+  padding: 0 12px;
+  height: 100%;
+  min-height: 40px;
+  font-size: 0.82rem;
+  font-weight: 580;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.vault-denom-btn + .vault-denom-btn { border-left: 1px solid var(--border); min-width: 40px; }
+.vault-denom-btn:hover { color: var(--text); }
+.vault-denom-btn.is-active { color: var(--accent); background: var(--accent-soft); }
+
+.vault-input-wrap { display: flex; flex-direction: column; gap: 6px; }
+.vault-input-field { position: relative; display: flex; align-items: center; }
+.vault-input-prefix {
+  position: absolute;
+  left: 14px;
+  font-size: 1.15rem;
+  font-weight: 560;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.vault-input.has-prefix { padding-left: 28px; }
+.vault-equiv { font-size: 0.82rem; color: var(--text-faint); padding-left: 2px; }
+
+/* Wallet balance line: what you actually hold, one click to use all of it. */
+.vault-wallet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+.vault-wallet-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+}
+.vault-wallet-bal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 8px;
+  font-size: 0.86rem;
+  font-weight: 560;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.vault-wallet-bal:hover { color: var(--text); }
+.vault-max {
+  font-size: 0.68rem;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 6px;
+}
 
 /* ── Capability panel ──────────────────────────────────────────── */
 
@@ -1093,7 +1242,17 @@ h1, h2, h3, h4 {
 .tone-bad { background: var(--negative-soft); color: var(--negative); }
 .feed-time { font-size: 0.76rem; color: var(--text-faint); }
 .feed-trade { display: flex; flex-direction: column; gap: 3px; }
+.feed-trade-head { display: flex; align-items: center; gap: 8px; }
 .feed-trade-kind { font-size: 0.9rem; font-weight: 580; }
+.feed-pending {
+  font-size: 0.62rem;
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  padding: 1px 6px;
+}
 .feed-trade-legs { font-size: 0.82rem; color: var(--text-dim); }
 .feed-link {
   display: grid;
@@ -1454,6 +1613,7 @@ h1, h2, h3, h4 {
   .market-bar { flex-wrap: wrap; }
   .landing-points { grid-template-columns: 1fr; }
   .trade-intro { flex-direction: column; align-items: stretch; }
+  .trade-controls { align-items: flex-start; flex-direction: row; flex-wrap: wrap; gap: 16px; }
 }
 @media (max-width: 720px) {
   .app-sidebar { position: fixed; top: 60px; left: 0; z-index: 50; box-shadow: var(--shadow-lg); }
@@ -1487,6 +1647,84 @@ h1, h2, h3, h4 {
 .feed .panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
 .feed .feed-tabs { display: flex; width: 100%; }
 .feed .feed-tab { flex: 1; justify-content: center; }
+
+/* ── Pending orders ────────────────────────────────────────────────
+   The resting limit orders, in the same rail below the activity feed. One card,
+   one row per order, each tagged with the mode that placed it and carrying a
+   single cancel the owner signs. Sharp edges and the same tokens as the feed, so
+   the two read as one rail. */
+.orders-panel { margin-top: 16px; }
+.orders-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  font-size: 0.76rem;
+  font-weight: 640;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+}
+.orders-body { max-height: 360px; overflow-y: auto; margin: 0 -6px; padding: 2px 6px 0; }
+.orders-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.order-row {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.order-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.order-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.mode-autonomous {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.mode-copilot { color: var(--text-dim); background: var(--surface-raised); border-color: var(--border-strong); }
+.mode-unknown { color: var(--text-faint); background: var(--surface-raised); border-color: var(--border); }
+.order-expiry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.order-expiry.is-expired { color: var(--negative); }
+.order-pair { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.order-pair-text { font-size: 0.9rem; font-weight: 560; }
+.order-pair-arrow { color: var(--text-faint); font-size: 0.9rem; }
+.order-row-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.order-trigger { display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; color: var(--text-dim); }
+.order-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  font-size: 0.8rem;
+  font-weight: 560;
+  color: var(--text-dim);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+.order-cancel:hover:not(:disabled) { color: var(--negative); background: var(--negative-soft); border-color: var(--negative); }
+.order-cancel:disabled { opacity: 0.7; cursor: default; }
 
 /* ── Jump to latest ────────────────────────────────────────────── */
 

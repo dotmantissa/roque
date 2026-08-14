@@ -10,6 +10,7 @@
 
 import { useAppData } from "@/providers/AppData";
 import { ActivityFeed } from "./ActivityFeed";
+import { PendingOrders } from "./PendingOrders";
 
 export function Sidebar({ open }: { open: boolean }) {
   const { activity } = useAppData();
@@ -18,6 +19,7 @@ export function Sidebar({ open }: { open: boolean }) {
     <aside className={`app-sidebar ${open ? "is-open" : "is-closed"}`} aria-hidden={!open}>
       <div className="app-sidebar-inner">
         <ActivityFeed activity={activity.data} loading={activity.loading} />
+        <PendingOrders />
       </div>
     </aside>
   );

@@ -352,7 +352,7 @@ export async function attachTxHash(id: string, txHash: string): Promise<void> {
 export async function intentHistory(user: string, limit = 25) {
   return q(
     `SELECT id, mode, command, status, kind, token_in, token_out, amount,
-            reason, error, tx_hash, created_at
+            amount_is_percent, reason, error, tx_hash, created_at
        FROM intents WHERE LOWER(user_address)=LOWER($1) ORDER BY created_at DESC LIMIT $2`,
     [user, limit],
   );

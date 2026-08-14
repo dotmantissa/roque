@@ -13,6 +13,7 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { sepolia } from "viem/chains";
 import { ThemeProvider, useTheme } from "./ThemeProvider";
 import { ToastProvider } from "@/components/Toaster";
+import { ChessCanvas } from "@/components/ChessCanvas";
 
 const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 
@@ -52,6 +53,7 @@ function WalletLayer({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
+      <ChessCanvas />
       <ToastProvider>
         <WalletLayer>{children}</WalletLayer>
       </ToastProvider>

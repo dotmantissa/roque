@@ -1,4 +1,4 @@
-# v0.1.0
+# v0.2.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -213,6 +213,7 @@ fences:
   "tokenIn": "<one of the ten symbols above>",
   "tokenOut": "<one of the ten symbols above>",
   "amount": "<decimal number as a string, e.g. 100 or 0.5>",
+  "amountToken": "<which symbol the amount measures: tokenIn to spend that much, tokenOut to receive that much>",
   "amountIsPercent": true | false,
   "triggerPrice": "<ETH price in USD as a string, limit orders only, else empty>",
   "triggerAbove": true | false,
@@ -226,6 +227,12 @@ Rules:
 - tokenIn is what the person gives up, tokenOut is what they receive. "Buy X
   with Y" means tokenIn Y and tokenOut X. "Sell X for Y" means tokenIn X and
   tokenOut Y. "Swap X to Y" means tokenIn X and tokenOut Y.
+- The amount is how much of tokenIn to spend; Roque only ever swaps an exact
+  amount you spend. In the normal case set amountToken to tokenIn. Only when the
+  person pins the amount they want to RECEIVE ("swap BTC to get 20 usdc", "so I
+  end up with 0.5 eth", "buy exactly 100 dai") set amountToken to tokenOut. For
+  "half", "all" or a percentage, amountIsPercent is true and amountToken is
+  tokenIn.
 - "half", "all", "25 percent" set amountIsPercent true and amount the number
   only ("50", "100", "25").
 - Resting limit orders track ether's dollar price only, so use "limit" solely
@@ -324,6 +331,24 @@ Rules:
         if is_percent and not self._percent_in_range(amount):
             reject["error"] = "percent must be between 0 and 100"
             return reject
+
+        # Roque executes exact-input swaps only: the amount is always how much of
+        # tokenIn the user spends. When someone instead fixes what they want to
+        # receive ("swap rWBTC to get 20 rUSDC"), the model marks the amount as
+        # denominated in tokenOut. We cannot honour that on-chain without solving
+        # for a variable input, and guessing would risk spending far more than
+        # intended, so we refuse with a concrete rephrasing rather than act on it.
+        # Percentages are always a fraction of the input, so they are exempt.
+        if not is_percent:
+            amount_token = self._normalize_token(candidate.get("amountToken"))
+            if amount_token == token_out and token_out != token_in:
+                reject["error"] = (
+                    "Roque swaps an exact amount you spend, not an exact amount "
+                    f"you receive. Tell me how much {token_in} to spend instead, "
+                    f"for example 'swap 5 {token_in} for {token_out}'."
+                )
+                reject["reason"] = str(candidate.get("reason", ""))[:200]
+                return reject
 
         trigger_price = ""
         trigger_above = bool(candidate.get("triggerAbove", False))

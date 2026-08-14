@@ -18,6 +18,7 @@ import {
   intentHistory,
   tradeHistory,
 } from "./services.js";
+import { openOrders } from "./orders.js";
 import { quoteSwap, poolReserves } from "./quote.js";
 import { ethUsd, allTokenUsd } from "./prices.js";
 import {
@@ -282,6 +283,12 @@ export async function handleActivity(userRaw: string, limit = 25) {
     tradeHistory(user, limit),
   ]);
   return { intents, trades };
+}
+
+/** Every limit order the user still has resting on-chain, tagged by mode. */
+export async function handleOpenOrders(userRaw: string) {
+  const user = parse(address, userRaw);
+  return { orders: await openOrders(user) };
 }
 
 // ─────────────────────────────────────────────────────────────

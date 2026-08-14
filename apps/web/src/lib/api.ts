@@ -12,6 +12,7 @@ import type {
   CapabilityResult,
   InterpretResult,
   Mode,
+  OrdersResult,
   PrepareResult,
   PriceResult,
   ReservesResult,
@@ -113,5 +114,9 @@ export const api = {
 
   activity(user: string) {
     return request<ActivityResult>(`/activity/${user}`);
+  },
+
+  orders(user: string) {
+    return request<OrdersResult>(`/orders/${user}`);
   },
 };

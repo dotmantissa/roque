@@ -91,6 +91,7 @@ export interface IntentRow {
   token_in: string | null;
   token_out: string | null;
   amount: string | null;
+  amount_is_percent: boolean;
   reason: string | null;
   error: string | null;
   tx_hash: string | null;
@@ -114,6 +115,30 @@ export interface TradeRow {
 export interface ActivityResult {
   intents: IntentRow[];
   trades: TradeRow[];
+}
+
+/**
+ * A limit order still resting on-chain, read live from the OrderBook. Amounts and
+ * the trigger price arrive in human units; `mode` is the surface that placed it,
+ * recovered from the intent that created it, or null when that could not be matched.
+ */
+export interface OpenOrder {
+  id: string;
+  mode: Mode | null;
+  tokenIn: string;
+  tokenOut: string;
+  tokenInSymbol: string;
+  tokenOutSymbol: string;
+  amountIn: string;
+  minAmountOut: string;
+  triggerPrice: string;
+  triggerAbove: boolean;
+  expiry: number;
+  expired: boolean;
+}
+
+export interface OrdersResult {
+  orders: OpenOrder[];
 }
 
 /** How far a card's on-chain action has got. Persisted with the turn so a signed,

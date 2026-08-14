@@ -10,7 +10,8 @@
  * too, as a plain, unbothered refusal rather than a dead end.
  */
 
-import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash } from "lucide-react";
+import { useRef } from "react";
+import { ArrowRight, Sparkles, TrendingUp, TrendingDown, ShieldCheck, CircleSlash, Check, AlertTriangle } from "lucide-react";
 import type { InterpretResult, Mode, SettleState } from "@/lib/types";
 import { useWallet } from "@/lib/useWallet";
 import { useToast } from "./Toaster";
@@ -57,6 +58,9 @@ export function IntentCard({
   // local state, so a trade that already settled stays settled after the route
   // unmounts and mounts again. This card reads it and reports transitions up.
   const state = settleState;
+  // A synchronous latch so a double click in the same tick cannot fire two
+  // signatures before the state flips to "working" and the button goes away.
+  const runningRef = useRef(false);
 
   const interp = result.interpretation;
   const quote = result.quote;
@@ -92,6 +96,11 @@ export function IntentCard({
       wallet.login();
       return;
     }
+    // Only ever from a standing start. Once it is working, done, or failed the
+    // action is spent; the card shows a status instead of a button, and this
+    // latch guards the sliver of time before that first render lands.
+    if (runningRef.current || state !== "idle") return;
+    runningRef.current = true;
     onSettle({ settleState: "working" });
     const pending = toast.push({
       kind: "pending",
@@ -146,13 +155,20 @@ export function IntentCard({
       onSettled?.();
     } catch (err) {
       toast.dismiss(pending);
-      onSettle({ settleState: "failed" });
       const message = (err as Error).message || "That did not go through.";
       if (isRejection(message)) {
+        // A wallet rejection is not a signature: nothing was sent, so the trade
+        // is still on offer. Fall back to idle so it can be signed once, later.
+        onSettle({ settleState: "idle" });
         toast.info("No worries, waved off", "You turned that signature down. Nothing was sent.");
       } else {
+        // A real failure after submitting is terminal; the card will not offer
+        // to sign the same intent a second time.
+        onSettle({ settleState: "failed" });
         toast.error("That trade did not go through", message);
       }
+    } finally {
+      runningRef.current = false;
     }
   };
   const preview = concretePreview();
@@ -160,15 +176,20 @@ export function IntentCard({
   const inLabel = interp.tokenIn;
 
   const actionLabel = (): string => {
-    if (state === "done") return isLimit ? "Order placed" : "Trade done";
     if (mode === "autonomous") return isLimit ? "Let Roque rest this order" : "Let Roque trade this";
     if (!wallet.connected) return "Connect to sign";
     return isLimit ? "Place this order" : "Sign and swap";
   };
 
-  const disabled =
-    state === "working" ||
-    state === "done" ||
+  const statusLabel = (): string => {
+    if (state === "working") return mode === "autonomous" ? "Roque is trading…" : "Submitting…";
+    if (state === "done") return isLimit ? "Order placed" : "Trade done";
+    return "Didn't go through";
+  };
+
+  // The button only exists in the idle state; a percent trade still needs a
+  // resolvable base, and autonomous still needs a live capability.
+  const idleDisabled =
     (mode === "autonomous" && !canAutonomous) ||
     (interp.amountIsPercent && !preview && wallet.connected);
 
@@ -264,14 +285,18 @@ export function IntentCard({
               : "You sign this from your own wallet"}
           </span>
         )}
-        <button
-          className={`btn ${state === "done" ? "btn-ghost" : "btn-primary"} intent-action`}
-          onClick={run}
-          disabled={disabled}
-        >
-          {state === "working" ? <span className="spinner" /> : null}
-          {actionLabel()}
-        </button>
+        {state === "idle" ? (
+          <button className="btn btn-primary intent-action" onClick={run} disabled={idleDisabled}>
+            {actionLabel()}
+          </button>
+        ) : (
+          <span className={`intent-status intent-status-${state}`} role="status" aria-live="polite">
+            {state === "working" ? <span className="spinner" /> : null}
+            {state === "done" ? <Check size={15} /> : null}
+            {state === "failed" ? <AlertTriangle size={15} /> : null}
+            {statusLabel()}
+          </span>
+        )}
       </div>
     </div>
   );

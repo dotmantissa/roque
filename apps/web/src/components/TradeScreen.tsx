@@ -10,7 +10,8 @@
  * conversations never mix.
  */
 
-import { Settings2 } from "lucide-react";
+import { useState } from "react";
+import { Settings2, ShieldCheck, Zap, AlertTriangle, X } from "lucide-react";
 import type { Mode } from "@/lib/types";
 import { useAppData } from "@/providers/AppData";
 import { MarketBar } from "./MarketBar";
@@ -49,10 +50,18 @@ export function TradeScreen({ mode }: { mode: Mode }) {
     canAutonomous,
     slippageBps,
     setSlippageBps,
+    execMode,
+    setExecMode,
     refreshAll,
   } = useAppData();
 
+  // Turning direct execution on is a deliberate, warned choice; turning it back
+  // off is not, so only the on-switch passes through this confirmation.
+  const [warnDirect, setWarnDirect] = useState(false);
+
   const copy = COPY[mode];
+  const isAutonomous = mode === "autonomous";
+  const directOn = isAutonomous && execMode === "direct";
 
   return (
     <div className="trade-screen">
@@ -63,24 +72,62 @@ export function TradeScreen({ mode }: { mode: Mode }) {
           <h1 className="trade-title">{copy.title}</h1>
           <p className="trade-sub">{copy.sub}</p>
         </div>
-        <div className="slippage">
-          <span className="slippage-label">
-            <Settings2 size={13} />
-            Slippage
-          </span>
-          <div className="seg">
-            {SLIPPAGE_PRESETS.map((p) => (
-              <button
-                key={p.bps}
-                className={`seg-btn ${slippageBps === p.bps ? "is-active" : ""}`}
-                onClick={() => setSlippageBps(p.bps)}
-              >
-                {p.label}
-              </button>
-            ))}
+
+        <div className="trade-controls">
+          {isAutonomous ? (
+            <div className="exec-mode">
+              <span className="exec-mode-label">
+                {directOn ? <Zap size={13} /> : <ShieldCheck size={13} />}
+                Execution
+              </span>
+              <div className="seg">
+                <button
+                  className={`seg-btn ${execMode === "confirm" ? "is-active" : ""}`}
+                  onClick={() => setExecMode("confirm")}
+                >
+                  Confirm
+                </button>
+                <button
+                  className={`seg-btn seg-btn-danger ${execMode === "direct" ? "is-active" : ""}`}
+                  onClick={() => {
+                    if (execMode !== "direct") setWarnDirect(true);
+                  }}
+                >
+                  Direct
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="slippage">
+            <span className="slippage-label">
+              <Settings2 size={13} />
+              Slippage
+            </span>
+            <div className="seg">
+              {SLIPPAGE_PRESETS.map((p) => (
+                <button
+                  key={p.bps}
+                  className={`seg-btn ${slippageBps === p.bps ? "is-active" : ""}`}
+                  onClick={() => setSlippageBps(p.bps)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
+
+      {directOn ? (
+        <div className="exec-danger-banner animate-rise" role="status" aria-live="polite">
+          <AlertTriangle size={15} />
+          <span>
+            <strong>Direct execution is on.</strong> Roque trades the moment it reads your message,
+            with no card to review and no tap to confirm. Switch to Confirm to check each trade first.
+          </span>
+        </div>
+      ) : null}
 
       <div className="workbench">
         <div className="workbench-main">
@@ -116,6 +163,51 @@ export function TradeScreen({ mode }: { mode: Mode }) {
           />
         </aside>
       </div>
+
+      {warnDirect ? (
+        <div className="modal-overlay" role="presentation">
+          <div
+            className="modal-dialog animate-scale-in"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="direct-title"
+          >
+            <button className="modal-x" onClick={() => setWarnDirect(false)} aria-label="Close">
+              <X size={16} />
+            </button>
+            <div className="modal-danger-icon">
+              <AlertTriangle size={22} />
+            </div>
+            <h3 id="direct-title" className="modal-title">
+              Turn on direct execution?
+            </h3>
+            <p className="modal-body">
+              In direct execution, Roque acts the instant it reads your message as a trade. There is
+              no card to review and no tap to confirm; it signs and sends from your vault straight
+              away, inside the caps you set.
+              <br />
+              <br />
+              This is faster, and more dangerous. A misread instruction becomes a real trade before
+              you can catch it. Roque still cannot spend past your capability or touch anything
+              outside the vault, but within those limits it will not wait for you.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setWarnDirect(false)}>
+                Keep confirming
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  setExecMode("direct");
+                  setWarnDirect(false);
+                }}
+              >
+                I understand, turn it on
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

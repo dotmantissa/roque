@@ -326,6 +326,84 @@ def test_rejects_limit_without_ether(contract: RoqueInterpreter) -> None:
     assert "rweth" in out["error"].lower() or "ether" in out["error"].lower()
 
 
+def test_rejects_exact_output_amount(contract: RoqueInterpreter) -> None:
+    # "swap rWBTC to get 20 rUSDC" pins the amount to the token being RECEIVED.
+    # Roque only swaps an exact amount you spend, so applying "20" to the rWBTC
+    # input would spend 20 whole bitcoin. The gate refuses and tells the user how
+    # to phrase it as an exact-input trade instead.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rWBTC",
+            "tokenOut": "rUSDC",
+            "amount": "20",
+            "amountToken": "rUSDC",
+            "amountIsPercent": False,
+            "confidence": "high",
+            "reason": "Swap bitcoin to receive exactly 20 dollars",
+        }
+    )
+    out = _interpret(contract, "swap rwbtc to get 20 usdc")
+    assert out["ok"] is False
+    assert "spend" in out["error"].lower()
+    assert "rwbtc" in out["error"].lower()  # names the token to spend
+
+
+def test_exact_input_amount_token_is_accepted(contract: RoqueInterpreter) -> None:
+    # The same pair, but the amount is denominated in the token being SPENT.
+    # This is a normal exact-input swap and must go through untouched.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rWBTC",
+            "tokenOut": "rUSDC",
+            "amount": "0.5",
+            "amountToken": "rWBTC",
+            "reason": "Sell half a bitcoin",
+        }
+    )
+    out = _interpret(contract, "swap 0.5 rwbtc for usdc")
+    assert out["ok"] is True
+    assert out["amount"] == "0.5"
+    assert out["tokenIn"] == "rWBTC"
+
+
+def test_missing_amount_token_defaults_to_input(contract: RoqueInterpreter) -> None:
+    # A model that omits amountToken (older prompt, or just terse) is read as the
+    # spend amount, exactly as before. Backward compatible with every other test.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rWBTC",
+            "tokenOut": "rUSDC",
+            "amount": "0.25",
+            "reason": "Sell a quarter bitcoin",
+        }
+    )
+    out = _interpret(contract, "swap 0.25 rwbtc for usdc")
+    assert out["ok"] is True
+    assert out["amount"] == "0.25"
+
+
+def test_percent_is_exempt_from_exact_output_check(contract: RoqueInterpreter) -> None:
+    # A percentage is always a fraction of the input, so even if the model
+    # mislabels amountToken as the output token, a percent trade is still valid.
+    _model_says(
+        {
+            "kind": "swap",
+            "tokenIn": "rWETH",
+            "tokenOut": "rUSDC",
+            "amount": "50",
+            "amountIsPercent": True,
+            "amountToken": "rUSDC",
+            "reason": "Sell half the ether position",
+        }
+    )
+    out = _interpret(contract, "sell half my ETH")
+    assert out["ok"] is True
+    assert out["amountIsPercent"] is True
+
+
 def test_rejects_unknown_kind(contract: RoqueInterpreter) -> None:
     _model_says(
         {
