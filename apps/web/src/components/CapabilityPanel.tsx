@@ -99,15 +99,18 @@ export function CapabilityPanel({
       // byte what was signed. signGrant already scaled the dollar caps to 1e18;
       // send those scaled strings back, never the raw "250" the field held, or
       // the recovered signer will not match and the grant reverts.
-      const { txHash } = await api.grant({
-        user: address,
-        agentSigner,
-        maxPerTradeUsd: message.maxPerTradeUsd,
-        maxDailyUsd: message.maxDailyUsd,
-        maxSlippageBps: message.maxSlippageBps,
-        validUntil: message.validUntil,
-        signature,
-      });
+      const { txHash } = await api.grant(
+        {
+          user: address,
+          agentSigner,
+          maxPerTradeUsd: message.maxPerTradeUsd,
+          maxDailyUsd: message.maxDailyUsd,
+          maxSlippageBps: message.maxSlippageBps,
+          validUntil: message.validUntil,
+          signature,
+        },
+        client,
+      );
       toast.dismiss(relaying);
       toast.success("Roque is cleared to trade", "Within the limits you just set, and not a cent past them.", {
         href: `${EXPLORER}${txHash}`,

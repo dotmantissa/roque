@@ -73,6 +73,13 @@ export {
 export { indexOnce, indexToHead, DEPLOY_BLOCK } from "./indexer.js";
 export { keeperTick, type KeeperResult } from "./keeper.js";
 export { q, sql, ensureSchema, SCHEMA_SQL } from "./db/index.js";
+export {
+  issueWalletChallenge,
+  completeWalletChallenge,
+  authenticatedOwner,
+  type WalletChallenge,
+  type OwnerSession,
+} from "./auth.js";
 
 // The transport-agnostic request handlers both backends share.
 export * as api from "./api.js";

@@ -32,6 +32,11 @@ import {
 import { keeperTick } from "./keeper.js";
 import { indexToHead } from "./indexer.js";
 import { q as dbQuery } from "./db/index.js";
+import {
+  authenticatedOwner,
+  completeWalletChallenge,
+  issueWalletChallenge,
+} from "./auth.js";
 
 /** An error carrying the HTTP status the transport should answer with. */
 export class ApiError extends Error {
@@ -46,6 +51,11 @@ export class ApiError extends Error {
 const address = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/u, "That does not look like an Ethereum address.")
+  .transform((s) => s as `0x${string}`);
+
+const signature = z
+  .string()
+  .regex(/^0x[a-fA-F0-9]+$/u, "That is not a signature.")
   .transform((s) => s as `0x${string}`);
 
 // Any of our ten tradable tokens, named by its on-chain symbol. Validated
@@ -64,6 +74,46 @@ function parse<S extends z.ZodTypeAny>(schema: S, body: unknown): z.infer<S> {
   return result.data;
 }
 
+async function requireAutonomousOwner(
+  sessionToken: string | undefined,
+  requestedOwner?: `0x${string}`,
+): Promise<`0x${string}`> {
+  const owner = await authenticatedOwner(sessionToken);
+  if (!owner) {
+    throw new ApiError(401, "Authenticate this autonomous request with your wallet.");
+  }
+  if (requestedOwner && owner.toLowerCase() !== requestedOwner.toLowerCase()) {
+    throw new ApiError(403, "This wallet session does not own the requested vault.");
+  }
+  return owner;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Wallet authentication for autonomous requests
+// ─────────────────────────────────────────────────────────────
+
+const authChallengeSchema = z.object({ owner: address });
+
+export async function handleAuthChallenge(body: unknown) {
+  const input = parse(authChallengeSchema, body);
+  return issueWalletChallenge(input.owner);
+}
+
+const authSessionSchema = z.object({
+  challengeId: z.string().uuid("That is not a valid challenge."),
+  owner: address,
+  signature,
+});
+
+export async function handleAuthSession(body: unknown) {
+  const input = parse(authSessionSchema, body);
+  const session = await completeWalletChallenge(input);
+  if (!session) {
+    throw new ApiError(401, "That wallet challenge is invalid or expired.");
+  }
+  return session;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Judgment: read a command into a structured, quoted intent
 // ─────────────────────────────────────────────────────────────
@@ -74,8 +124,12 @@ const interpretSchema = z.object({
   user: address.optional(),
 });
 
-export async function handleInterpret(body: unknown) {
+export async function handleInterpret(body: unknown, sessionToken?: string) {
   const input = parse(interpretSchema, body);
+  if (input.mode === "autonomous") {
+    const owner = await requireAutonomousOwner(sessionToken, input.user);
+    return interpretCommand({ user: owner, mode: input.mode, command: input.command });
+  }
   return interpretCommand({ user: input.user, mode: input.mode, command: input.command });
 }
 
@@ -191,11 +245,12 @@ const grantSchema = z.object({
   maxDailyUsd: z.string().min(1),
   maxSlippageBps: z.string().min(1),
   validUntil: z.string().min(1),
-  signature: z.string().regex(/^0x[a-fA-F0-9]+$/u, "That is not a signature."),
+  signature,
 });
 
-export async function handleGrant(body: unknown) {
+export async function handleGrant(body: unknown, sessionToken?: string) {
   const input = parse(grantSchema, body);
+  await requireAutonomousOwner(sessionToken, input.user);
   const txHash = await submitGrant({
     user: input.user,
     agentSigner: input.agentSigner,
@@ -203,7 +258,7 @@ export async function handleGrant(body: unknown) {
     maxDailyUsd: BigInt(input.maxDailyUsd),
     maxSlippageBps: BigInt(input.maxSlippageBps),
     validUntil: BigInt(input.validUntil),
-    signature: input.signature as `0x${string}`,
+    signature: input.signature,
   });
   return { txHash };
 }
@@ -214,12 +269,13 @@ const executeSchema = z.object({
   slippageBps: z.number().int().min(0).max(5000).default(100),
 });
 
-export async function handleExecute(body: unknown) {
+export async function handleExecute(body: unknown, sessionToken?: string) {
   const input = parse(executeSchema, body);
+  const owner = await requireAutonomousOwner(sessionToken, input.user);
   try {
     return await executeAutonomous({
       id: input.id,
-      user: input.user,
+      user: owner,
       slippageBps: input.slippageBps,
     });
   } catch (err) {

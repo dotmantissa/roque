@@ -45,10 +45,8 @@ export function useWallet(): RoqueWallet {
   const getClient = useCallback(async () => {
     if (!address) throw new Error("Connect a wallet first.");
     // The provider has to come from the live list. Match it to the session
-    // address so a second connected wallet can never sign for the first, and
-    // fall back to the only wallet on the list when the match is momentarily gone.
-    const active =
-      wallets.find((w) => w.address?.toLowerCase() === address.toLowerCase()) ?? wallets[0];
+    // address so a second connected wallet can never sign for the first.
+    const active = wallets.find((w) => w.address?.toLowerCase() === address.toLowerCase());
     if (!active) throw new Error("Reconnect your wallet to sign this.");
     // Privy's provider type carries a looser event signature than viem's
     // EIP1193Provider; they are the same object at runtime, so we narrow it here
@@ -56,6 +54,9 @@ export function useWallet(): RoqueWallet {
     const provider = (await active.getEthereumProvider()) as unknown as EIP1193Provider;
     await ensureSepolia(provider);
     const acct = active.address as `0x${string}`;
+    if (acct.toLowerCase() !== address.toLowerCase()) {
+      throw new Error("The connected signer does not match your authenticated wallet.");
+    }
     return { client: walletClientFrom(provider, acct), address: acct };
   }, [address, wallets]);
 

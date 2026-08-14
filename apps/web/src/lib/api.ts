@@ -18,6 +18,7 @@ import type {
   ReservesResult,
   VaultResult,
 } from "./types";
+import type { Account, WalletClient } from "viem";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -39,10 +40,76 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+interface AuthChallenge {
+  challengeId: string;
+  message: string;
+  expiresAt: number;
+}
+
+interface AuthSession {
+  token: string;
+  owner: `0x${string}`;
+  expiresAt: number;
+}
+
+let autonomousSession: AuthSession | null = null;
+
+async function autonomousToken(
+  wallet: WalletClient,
+  owner: `0x${string}`,
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  if (
+    autonomousSession &&
+    autonomousSession.owner.toLowerCase() === owner.toLowerCase() &&
+    autonomousSession.expiresAt > now + 30
+  ) {
+    return autonomousSession.token;
+  }
+
+  const challenge = await request<AuthChallenge>("/auth/challenge", {
+    method: "POST",
+    body: JSON.stringify({ owner }),
+  });
+  const signature = await wallet.signMessage({
+    account: owner as unknown as Account,
+    message: challenge.message,
+  });
+  const session = await request<AuthSession>("/auth/session", {
+    method: "POST",
+    body: JSON.stringify({
+      challengeId: challenge.challengeId,
+      owner,
+      signature,
+    }),
+  });
+  if (session.owner.toLowerCase() !== owner.toLowerCase()) {
+    throw new Error("The wallet session was issued for a different owner.");
+  }
+  autonomousSession = session;
+  return session.token;
+}
+
+function bearer(token: string): HeadersInit {
+  return { authorization: `Bearer ${token}` };
+}
+
 export const api = {
-  interpret(command: string, mode: Mode, user?: string) {
+  async interpret(
+    command: string,
+    mode: Mode,
+    user?: `0x${string}`,
+    wallet?: WalletClient,
+  ) {
+    let token: string | undefined;
+    if (mode === "autonomous") {
+      if (!user) throw new Error("Connect a wallet first.");
+      if (!wallet) throw new Error("Reconnect your wallet to authenticate.");
+      token = await autonomousToken(wallet, user);
+    }
     return request<InterpretResult>("/interpret", {
       method: "POST",
+      headers: token ? bearer(token) : undefined,
       body: JSON.stringify({ command, mode, user }),
     });
   },
@@ -78,24 +145,31 @@ export const api = {
     });
   },
 
-  grant(input: {
-    user: string;
+  async grant(input: {
+    user: `0x${string}`;
     agentSigner: string;
     maxPerTradeUsd: string;
     maxDailyUsd: string;
     maxSlippageBps: string;
     validUntil: string;
     signature: string;
-  }) {
+  }, wallet: WalletClient) {
+    const token = await autonomousToken(wallet, input.user);
     return request<{ txHash: string }>("/grant", {
       method: "POST",
+      headers: bearer(token),
       body: JSON.stringify(input),
     });
   },
 
-  execute(input: { id: string; user: string; slippageBps: number }) {
+  async execute(
+    input: { id: string; user: `0x${string}`; slippageBps: number },
+    wallet: WalletClient,
+  ) {
+    const token = await autonomousToken(wallet, input.user);
     return request<{ txHash: string; kind: "swap" | "limit" }>("/execute", {
       method: "POST",
+      headers: bearer(token),
       body: JSON.stringify(input),
     });
   },
