@@ -19,6 +19,7 @@ import { tokenList } from "@roque/shared";
 import type { PriceResult } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
+import { Sparkline } from "./Sparkline";
 
 // The assets that take turns in the rotating slot: everything that is not a dollar
 // stable and not ether itself. Order follows the deploy roster.
@@ -69,6 +70,7 @@ export function MarketBar({
           <span className="freshness-dot" />
           {data ? `oracle updated ${data.ageSeconds}s ago` : "reading oracle"}
         </div>
+       {data ? <Sparkline pair="rWETH/USD" /> : null}
       </div>
 
       <div className="market-divider" />
