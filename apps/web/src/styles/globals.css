@@ -1956,3 +1956,24 @@ h1, h2, h3, h4 {
     justify-content: flex-end;
   }
 }
+/* ── Wallet total value ───────────────────────────────────────── */
+.wallet-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: var(--surface-2, rgba(99, 102, 241, 0.08));
+  border: 1px solid var(--border);
+}
+.wallet-total-label {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wallet-total-value {
+  font-size: 1.3rem;
+  font-weight: 680;
+}

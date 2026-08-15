@@ -14,9 +14,10 @@ import Link from "next/link";
 import { Droplet, Droplets, RefreshCw } from "lucide-react";
 import { tokenList, requireToken } from "@roque/shared";
 import { useWallet } from "@/lib/useWallet";
+import { useAppData } from "@/providers/AppData";
 import { useToast } from "./Toaster";
 import { claimFaucet, claimAllFaucets } from "@/lib/chain";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatUsd } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
 
 const EXPLORER = "https://sepolia.etherscan.io/tx/";
@@ -35,7 +36,12 @@ export function WalletPanel({
 }) {
   const wallet = useWallet();
   const toast = useToast();
+  const { prices } = useAppData();
   const [claiming, setClaiming] = useState<string | null>(null);
+
+  const totalUsd = balances
+    ? tokenList.reduce((sum, t) => sum + (balances[t.symbol] ?? 0) * (prices[t.symbol] ?? 0), 0)
+    : 0;
 
   if (!wallet.connected) {
     return (
@@ -117,6 +123,13 @@ export function WalletPanel({
           <RefreshCw size={14} className={loading ? "is-spinning" : ""} />
         </button>
       </header>
+
+      {balances ? (
+        <div className="wallet-total">
+          <span className="wallet-total-label">Total value</span>
+          <span className="wallet-total-value tabular">{formatUsd(totalUsd)}</span>
+        </div>
+      ) : null}
 
       <button className="btn btn-primary claim-all" onClick={() => void claimEverything()} disabled={busy}>
         {claiming === ALL ? <span className="spinner" /> : <Droplets size={15} />}
