@@ -31,10 +31,7 @@ export function PortfolioPieChart({ slices }: { slices: Slice[] }) {
             ))}
           </Pie>
           <Tooltip
-            formatter={(value: number | undefined, name: string) => [
-              formatUsd(value ?? 0),
-              name,
-            ]}
+            formatter={(value, name) => [formatUsd(Number(value) || 0), String(name)]}
           />
         </PieChart>
       </ResponsiveContainer>
