@@ -70,7 +70,7 @@ export function MarketBar({
           <span className="freshness-dot" />
           {data ? `oracle updated ${data.ageSeconds}s ago` : "reading oracle"}
         </div>
-       {data ? <Sparkline pair="rWETH/USD" /> : null}
+        {data ? <Sparkline pair="rWETH/USD" /> : null}
       </div>
 
       <div className="market-divider" />

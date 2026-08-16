@@ -14,43 +14,47 @@ export function Sparkline({
 }) {
   const [history, setHistory] = useState<Point[]>([]);
 
-  // Record a point when the sparkline mounts, then keep recording every 45
-  // seconds while it stays mounted, so the line fills in with real movement
-  // instead of waiting on someone opening the big chart. The backend resolves
-  // the price itself from Chainlink, so no price is sent here.
-  useEffect(() => {
-    const record = () => {
-      fetch("/api/record-price", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pair }),
-      }).catch(() => {});
-    };
-    record();
-    const id = setInterval(record, 45000);
-    return () => clearInterval(id);
-  }, [pair]);
-
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    // Record one trusted observation when the sparkline mounts, then poll only
+    // history. Recording on an interval in every browser would multiply oracle
+    // and database writes by the number of visitors.
+    const load = async (record: boolean) => {
       try {
+        if (record) {
+          await fetch("/api/record-price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pair }),
+          });
+        }
         const res = await fetch(
           `/api/price-history?pair=${encodeURIComponent(pair)}&hours=1`,
         );
         if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setHistory(data.points ?? []);
+        const data = (await res.json()) as { points?: Point[] };
+        if (!cancelled) {
+          setHistory(
+            Array.isArray(data.points)
+              ? data.points.filter(
+                  (point) => Number.isFinite(point.t) && Number.isFinite(point.price),
+                )
+              : [],
+          );
+        }
       } catch {
         // A missing sparkline is not worth surfacing; the price itself still
         // reads fine without it.
+      } finally {
+        if (!cancelled) timeout = setTimeout(() => void load(false), 30000);
       }
     };
-    load();
-    const id = setInterval(load, 30000);
+    void load(true);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeout) clearTimeout(timeout);
     };
   }, [pair]);
 
