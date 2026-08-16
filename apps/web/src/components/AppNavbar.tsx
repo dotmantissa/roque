@@ -52,7 +52,7 @@ export function AppNavbar({ onToggleSidebar }: { onToggleSidebar: () => void }) 
               aria-current={active ? "page" : undefined}
             >
               {item.icon}
-              {item.label}
+              <span className={active ? "" : "nav-label-hide"}>{item.label}</span>
             </Link>
           );
         })}

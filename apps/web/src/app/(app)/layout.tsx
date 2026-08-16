@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { AppDataProvider } from "@/providers/AppData";
 import { AppNavbar } from "@/components/AppNavbar";
 import { Sidebar } from "@/components/Sidebar";
+import { MobileNav } from "@/components/MobileNav";
 
 const SIDEBAR_KEY = "roque-sidebar-open";
 
@@ -48,6 +49,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppDataProvider>
       <AppNavbar onToggleSidebar={toggleSidebar} />
+      <MobileNav />
       <div className={`app-body ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
         <Sidebar open={sidebarOpen} />
         <main className="app-main">{children}</main>
