@@ -18,11 +18,19 @@ const SIDEBAR_KEY = "roque-sidebar-open";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Restore the rail the way it was left. Default open, so a first-time visitor
-  // sees the activity rather than a blank margin.
+  // Restore the rail the way it was left. Default open on desktop, so a
+  // first-time visitor sees the activity rather than a blank margin. On small
+  // screens, default closed instead, since the rail overlays the whole screen
+  // there and would otherwise block the app on first load.
   useEffect(() => {
     const saved = window.localStorage.getItem(SIDEBAR_KEY);
-    if (saved === "closed") setSidebarOpen(false);
+    if (saved === "closed") {
+      setSidebarOpen(false);
+    } else if (saved === "open") {
+      setSidebarOpen(true);
+    } else if (window.matchMedia("(max-width: 720px)").matches) {
+      setSidebarOpen(false);
+    }
   }, []);
 
   const toggleSidebar = () => {
