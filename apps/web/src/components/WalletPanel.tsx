@@ -19,6 +19,7 @@ import { useToast } from "./Toaster";
 import { claimFaucet, claimAllFaucets } from "@/lib/chain";
 import { formatAmount, formatUsd } from "@/lib/format";
 import { TokenIcon } from "./TokenIcon";
+import { PortfolioPieChart } from "./PortfolioPieChart";
 
 const EXPLORER = "https://sepolia.etherscan.io/tx/";
 const ALL = "__all__";
@@ -129,6 +130,14 @@ export function WalletPanel({
           <span className="wallet-total-label">Total value</span>
           <span className="wallet-total-value tabular">{formatUsd(totalUsd)}</span>
         </div>
+      ) : null}
+      {balances ? (
+        <PortfolioPieChart
+          slices={tokenList.map((t) => ({
+            symbol: t.symbol,
+            usd: (balances[t.symbol] ?? 0) * (prices[t.symbol] ?? 0),
+          }))}
+        />
       ) : null}
 
       <button className="btn btn-primary claim-all" onClick={() => void claimEverything()} disabled={busy}>
