@@ -1635,8 +1635,12 @@ h1, h2, h3, h4 {
 }
 @media (max-width: 620px) {
   .app-main { padding: 18px 14px 40px; }
-  .app-nav { padding: 0 14px; }
+  .app-nav { padding: 0 10px; gap: 8px; }
   .testnet-box { display: none; }
+  .app-nav-links { display: none; }
+  .app-nav-right { flex-shrink: 0; gap: 6px; margin-left: auto; }
+  .wallet-chip { padding: 6px 8px; font-size: 0.72rem; }
+  .btn.btn-primary { padding: 8px 10px; font-size: 0.75rem; }
   .market-divider { display: none; }
   .console { height: min(76vh, 640px); }
   .landing { padding: 0 16px; }
@@ -2016,31 +2020,31 @@ html, body {
   font-size: 1.3rem;
   font-weight: 680;
 }
-/* ── Portfolio pie chart ──────────────────────────────────────── */
-.portfolio-pie {
-  margin-bottom: 12px;
-  padding: 10px 4px;
-  border-radius: 12px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--border);
+/* ── Mobile section nav (under the top navbar, small screens only) ────── */
+.mobile-nav {
+  display: none;
 }
-.portfolio-pie-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  justify-content: center;
-  padding: 0 12px 4px;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-}
-.portfolio-pie-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.portfolio-pie-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
+@media (max-width: 620px) {
+  .mobile-nav {
+    display: flex;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .mobile-nav-link {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 4px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  .mobile-nav-link.is-active {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
