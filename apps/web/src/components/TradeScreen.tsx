@@ -135,6 +135,7 @@ export function TradeScreen({ mode }: { mode: Mode }) {
             mode={mode}
             ethUsd={ethUsd}
             balances={balances.data}
+            vaultBalances={vault.data?.balances ?? null}
             prices={prices}
             canAutonomous={canAutonomous}
             slippageBps={slippageBps}
