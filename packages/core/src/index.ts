@@ -33,7 +33,6 @@ export {
   tokenUsd,
   allTokenUsd,
   usdValue,
-  usdValueRaw,
   toTriggerPrice,
   type EthPrice,
   type FeedPrice,

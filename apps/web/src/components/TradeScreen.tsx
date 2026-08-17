@@ -135,13 +135,6 @@ export function TradeScreen({ mode }: { mode: Mode }) {
             mode={mode}
             ethUsd={ethUsd}
             balances={balances.data}
-            vaultBalances={
-              vault.data?.balances
-                ? Object.fromEntries(
-                    Object.entries(vault.data.balances).map(([k, v]) => [k, Number(v)]),
-                  )
-                : null
-            }
             prices={prices}
             canAutonomous={canAutonomous}
             slippageBps={slippageBps}
