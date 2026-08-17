@@ -111,13 +111,20 @@ export async function allTokenUsd(): Promise<Record<string, number>> {
  * preview of "this trade is worth $X" matches the per-trade cap check on-chain.
  * Reads the executor's own `usdValue` view rather than reimplementing the maths.
  */
-export async function usdValue(token: `0x${string}`, amountRaw: bigint): Promise<number> {
-  const value = (await publicClient().readContract({
+export async function usdValueRaw(
+  token: `0x${string}`,
+  amountRaw: bigint,
+): Promise<bigint> {
+  return (await publicClient().readContract({
     address: addresses.agentExecutor,
     abi: abis.agentExecutor,
     functionName: "usdValue",
     args: [token, amountRaw],
   })) as bigint;
+}
+
+export async function usdValue(token: `0x${string}`, amountRaw: bigint): Promise<number> {
+  const value = await usdValueRaw(token, amountRaw);
   // The executor returns 1e18 fixed point dollars.
   return Number(value) / 1e18;
 }
