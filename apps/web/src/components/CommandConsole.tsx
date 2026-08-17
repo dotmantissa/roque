@@ -32,6 +32,7 @@ export function CommandConsole({
   mode,
   ethUsd,
   balances,
+  vaultBalances,
   prices,
   canAutonomous,
   slippageBps,
@@ -40,6 +41,7 @@ export function CommandConsole({
   mode: Mode;
   ethUsd: number;
   balances: Record<string, number> | null;
+  vaultBalances: Record<string, number> | null;
   prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
@@ -192,6 +194,7 @@ export function CommandConsole({
                       mode={mode}
                       ethUsd={ethUsd}
                       balances={balances}
+                      vaultBalances={vaultBalances}
                       prices={prices}
                       canAutonomous={canAutonomous}
                       slippageBps={slippageBps}
