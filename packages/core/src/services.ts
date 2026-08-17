@@ -22,7 +22,7 @@ import {
 } from "@roque/shared";
 import { interpret, type Interpretation } from "./genlayer.js";
 import { quoteSwap, minOutForSlippage } from "./quote.js";
-import { ethUsd, tokenUsd, toTriggerPrice } from "./prices.js";
+import { ethUsd, tokenUsd, toTriggerPrice, usdValue } from "./prices.js";
 import {
   signSwapIntent,
   signLimitIntent,
@@ -292,6 +292,17 @@ export async function executeAutonomous(params: {
   if (bal < amountInRaw) {
     throw new Error(
       `Your vault holds ${formatUnits(bal, tokenIn.decimals)} ${tokenIn.symbol}, which is short of this trade.`,
+    );
+  }
+
+  // Check the per-trade USD cap before ever touching the chain. Without this,
+  // an over-limit trade reaches the contract and reverts there, surfacing only
+  // an opaque "execution reverted" to the person instead of a clear reason.
+  const tradeUsd = await usdValue(tokenIn.address, amountInRaw);
+  const maxPerTradeUsd = Number(formatUnits(cap.maxPerTradeUsd, 18));
+  if (tradeUsd > maxPerTradeUsd) {
+    throw new Error(
+      `This trade ($${tradeUsd.toFixed(2)}) exceeds your per-trade limit of $${maxPerTradeUsd.toFixed(2)}.`,
     );
   }
 
