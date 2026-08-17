@@ -42,7 +42,6 @@ export function IntentCard({
   mode,
   ethUsd,
   balances,
-  vaultBalances,
   prices,
   canAutonomous,
   slippageBps,
@@ -55,7 +54,6 @@ export function IntentCard({
   mode: Mode;
   ethUsd: number;
   balances: Record<string, number> | null;
-  vaultBalances: Record<string, number> | null;
   prices: Record<string, number>;
   canAutonomous: boolean;
   slippageBps: number;
@@ -94,16 +92,11 @@ export function IntentCard({
     );
   }
 
- const concretePreview = (): string | null => {
+  const concretePreview = (): string | null => {
     if (!interp.amountIsPercent) return interp.amount;
-    // Autonomous mode can only ever spend from the vault, so the preview must
-    // resolve a percent against that balance, not the full wallet. Showing the
-    // wallet figure here would preview a larger trade than the agent can
-    // actually sign.
-    const base = mode === "autonomous" ? vaultBalances : balances;
-    if (!base) return null;
+    if (!balances) return null;
     try {
-      return resolveConcreteAmount(interp, base);
+      return resolveConcreteAmount(interp, balances);
     } catch {
       return null;
     }
