@@ -19,7 +19,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.10.1",
-    "viem": "^2.55.13"
+    "viem": "^2.55.15"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
