@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   vaultBalance: vi.fn(),
   quoteSwap: vi.fn(),
   minOutForSlippage: vi.fn(),
+  usdValue: vi.fn(),
 }));
 
 vi.mock("../src/db/index.js", () => ({ q: state.q }));
@@ -40,6 +41,7 @@ vi.mock("../src/prices.js", () => ({
   ethUsd: vi.fn(),
   tokenUsd: vi.fn(),
   toTriggerPrice: vi.fn(),
+  usdValue: state.usdValue,
 }));
 
 const { executeAutonomous } = await import("../src/services.js");
@@ -113,6 +115,7 @@ describe("stored autonomous intent ownership", () => {
       "0x3333333333333333333333333333333333333333",
     );
     state.vaultBalance.mockResolvedValue(10_000_000n);
+        state.usdValue.mockResolvedValue(1); // Well under the $500 cap in this test.
     state.quoteSwap.mockResolvedValue({ amountOutRaw: 1_000n });
     state.minOutForSlippage.mockReturnValue(990n);
     state.freshNonce.mockResolvedValue(1n);
