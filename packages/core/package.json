@@ -28,12 +28,12 @@
     "@neondatabase/serverless": "^1.0.1",
     "@roque/shared": "workspace:*",
     "genlayer-js": "^1.1.8",
-    "viem": "^2.55.13",
+    "viem": "^2.55.15",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   }
