@@ -22,7 +22,7 @@ import {
 } from "@roque/shared";
 import { interpret, type Interpretation } from "./genlayer.js";
 import { quoteSwap, minOutForSlippage } from "./quote.js";
-import { ethUsd, tokenUsd, toTriggerPrice, usdValue } from "./prices.js";
+import { ethUsd, tokenUsd, toTriggerPrice, usdValueRaw } from "./prices.js";
 import {
   signSwapIntent,
   signLimitIntent,
@@ -298,11 +298,12 @@ export async function executeAutonomous(params: {
   // Check the per-trade USD cap before ever touching the chain. Without this,
   // an over-limit trade reaches the contract and reverts there, surfacing only
   // an opaque "execution reverted" to the person instead of a clear reason.
-  const tradeUsd = await usdValue(tokenIn.address, amountInRaw);
-  const maxPerTradeUsd = Number(formatUnits(cap.maxPerTradeUsd, 18));
-  if (tradeUsd > maxPerTradeUsd) {
+  const tradeUsd = await usdValueRaw(tokenIn.address, amountInRaw);
+  if (tradeUsd > cap.maxPerTradeUsd) {
+    const tradeUsdDisplay = Number(formatUnits(tradeUsd, 18)).toFixed(2);
+    const capDisplay = Number(formatUnits(cap.maxPerTradeUsd, 18)).toFixed(2);
     throw new Error(
-      `This trade ($${tradeUsd.toFixed(2)}) exceeds your per-trade limit of $${maxPerTradeUsd.toFixed(2)}.`,
+      `This trade ($${tradeUsdDisplay}) exceeds your per-trade limit of $${capDisplay}.`,
     );
   }
 
