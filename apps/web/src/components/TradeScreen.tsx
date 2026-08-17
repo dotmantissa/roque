@@ -129,7 +129,7 @@ export function TradeScreen({ mode }: { mode: Mode }) {
         </div>
       ) : null}
 
-      <div className="workbench">
+      <div className={`workbench workbench-mode-${mode}`}>
         <div className="workbench-main">
           <CommandConsole
             mode={mode}
@@ -149,19 +149,7 @@ export function TradeScreen({ mode }: { mode: Mode }) {
           />
         </div>
 
-        <aside className="workbench-side">
-          {mode === "autonomous" ? (
-            <>
-              <CapabilityPanel
-                capability={capability.data}
-                agentSigner={agent.data?.agentSigner ?? null}
-                loading={capability.loading}
-                onChanged={refreshAll}
-              />
-              <VaultPanel vault={vault.data} loading={vault.loading} onSettled={refreshAll} />
-            </>
-          ) : null}
-
+        <aside className="workbench-wallet">
           <WalletPanel
             balances={balances.data}
             claims={claims.data}
@@ -169,6 +157,18 @@ export function TradeScreen({ mode }: { mode: Mode }) {
             onRefresh={refreshAll}
           />
         </aside>
+
+        {mode === "autonomous" ? (
+          <div className="autonomous-panels">
+            <CapabilityPanel
+              capability={capability.data}
+              agentSigner={agent.data?.agentSigner ?? null}
+              loading={capability.loading}
+              onChanged={refreshAll}
+            />
+            <VaultPanel vault={vault.data} loading={vault.loading} onSettled={refreshAll} />
+          </div>
+        ) : null}
       </div>
 
       {warnDirect ? (
