@@ -1655,6 +1655,11 @@ h1, h2, h3, h4 {
   .autonomous-panels { grid-template-columns: 1fr; }
   .workbench-wallet { height: auto; min-height: 0; }
   .workbench-wallet > .panel { height: auto; }
+  .workbench-wallet .balance-list {
+    flex: 0 0 auto;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
   .market-bar { flex-wrap: wrap; }
   .landing-points { grid-template-columns: 1fr; }
   .trade-intro { flex-direction: column; align-items: stretch; }
@@ -2122,6 +2127,47 @@ html, body {
 .wallet-total-value {
   font-size: 1.3rem;
   font-weight: 680;
+}
+.portfolio-pie {
+  min-width: 0;
+  margin-bottom: 12px;
+}
+.portfolio-pie-chart {
+  width: 100%;
+  height: 160px;
+  min-width: 0;
+}
+.portfolio-pie-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 0 4px 4px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+}
+.portfolio-pie-legend-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+.portfolio-pie-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.portfolio-pie-legend-symbol {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portfolio-pie-legend-value {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* ── Mobile section nav (under the top navbar, small screens only) ────── */
 .mobile-nav {
