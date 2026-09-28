@@ -14,7 +14,7 @@
     "@privy-io/react-auth": "^1.90.1",
     "@roque/core": "workspace:*",
     "@roque/shared": "workspace:*",
-    "lucide-react": "^0.469.0",
+    "lucide-react": "^1.31.0",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
