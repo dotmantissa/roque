@@ -45,7 +45,7 @@ export function ProposalCard({
           : "Write the order";
 
   return (
-    <article className="card proposal-card">
+        <article className="card proposal-card animate-rise">
       <header className="proposal-head">
         <span className="proposal-kind">{KIND_LABEL[proposal.kind] ?? "Note"}</span>
         <span className="event-card-time">{timeAgo(proposal.createdAt)}</span>

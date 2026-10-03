@@ -81,7 +81,7 @@ export function EventOrderCard({
   const items = order.evidence?.items ?? [];
 
   return (
-    <article className={`card event-card ${order.status === "rejected" ? "is-refused" : ""}`}>
+        <article className={`card event-card animate-rise ${order.status === "rejected" ? "is-refused" : ""}`}>
       <header className="event-card-head">
         <span className={`event-status ${status.tone}`}>
           {/* The spinner belongs to the request, not the status. It shows while

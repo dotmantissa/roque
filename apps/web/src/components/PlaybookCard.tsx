@@ -113,7 +113,7 @@ export function PlaybookCard({
       : null;
 
   return (
-    <article className="card playbook-card">
+        <article className="card playbook-card animate-rise">
       <header className="playbook-card-head">
         <div className="playbook-card-titles">
           <h3 className="playbook-card-name">{playbook.name}</h3>
