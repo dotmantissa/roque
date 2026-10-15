@@ -14,7 +14,7 @@
     "@fastify/cors": "^10.0.1",
     "@roque/core": "workspace:*",
     "@roque/shared": "workspace:*",
-    "fastify": "^5.2.0",
+    "fastify": "^5.12.5",
     "viem": "^2.55.13",
     "zod": "^3.24.1"
   },
