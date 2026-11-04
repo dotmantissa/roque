@@ -51,8 +51,8 @@ function pickChain() {
 }
 
 /**
- * A GenLayer client. Reads need no funded identity, so we spin up a throwaway
- * account; the interpreter never checks who is asking, only what was asked.
+ * Production keeps a stable caller so immutable jobs retain identity across replicas.
+ * Local development may use a generated account.
  */
 function client(): GLClient {
   if (!_client) {
@@ -161,6 +161,7 @@ async function waitForReceipt(
     try {
       const receipt = await gl.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 8, interval: 3000 });
       if (receipt.status !== TransactionStatus.FINALIZED) throw new Error("Consensus is not final.");
+      if (receipt.txExecutionResult === 2 || receipt.txExecutionResultName === "FINISHED_WITH_ERROR" || receipt.consensus_data?.leader_receipt?.some(r => r.error || r.execution_result === "ERROR")) throw new Error("Consensus execution failed.");
       return receipt;
     } catch (err) {
       lastErr = err;

@@ -1,0 +1,36 @@
+# Security remediation and verification
+
+Source baseline: `a0c34f6`. Implementation: `cfa7e05`, `9ba8f5b`, `147502c`, `05bbf91`, `91535e1` and later release commits. The original [review](SECURITY_REVIEW.md) remains the historical finding record. This tracker describes source/test closure; deployed and external policy evidence is recorded separately in [release notes](RELEASE.md).
+
+| Finding | Implemented protection | Verification |
+| --- | --- | --- |
+| S01 | Exact Python JSON types; strict Zod validation of consensus/backend input; bounded decimal arithmetic and supported intent types. | 50 interpreter tests, backend validation regressions and GenVM lint. |
+| S02 | EIP-712 v2 domain; capability generation in every spending/hold signature; direct grant, signed grant and revoke invalidate pending grant authority. | Six reproduced security regressions plus normal spending/commitment suite. Old vault signatures stay in the old contract; recovery is explicit. |
+| S03 | Fresh positive, nonzero and nonfuture oracle prices in executor and financial backend; bounded feed configuration. | Stale/future oracle tests and owner withdrawal tests. Stable test tokens are explicitly valued at $1. |
+| S04 | Limit creation enforces an output floor from the authorized slippage cap; the OrderBook enforces that fixed floor at fill. | Malicious zero-floor regression and pool slippage tests. Oracle/TWAP policies for production assets remain a separate asset-risk decision. |
+| S05 | Wallet owner proof; copilot-only immutable preparation; exact sender/chain/target/calldata checks; canonical successful receipt and matching event. | Owner/settlement regressions and isolated real wallet EVM end-to-end test. |
+| S06 | Authenticated private prompt/intent history; anonymous responses contain public chain trades only; cross-owner and cross-client reads rejected. | Owner/authentication tests and SQL tenant-isolation test. GenLayer commands remain public chain data. |
+| S07 | Bounded HTTP bodies/IP map, durable global/client/wallet quotas, one global interpretation lease, job retries and permanent operation cap. | HTTP rejection, idempotency/SQL tests and bounded keeper regression. New operation admission is fenced across replicas; existing idempotency records remain available at capacity. |
+| S08 | Durable sender/key lease, nonce reservation, signed bytes and hash before broadcast; exact-byte recovery. A preparation failure frees only an unsigned trailing reservation under its live lease. | PGlite overlapping-process, crash, lost-response and unsigned-hole regressions. Unknown signed attempts block replacement. |
+| S09 | Range lease and fenced checkpoint after persistence; idempotent events; deployment/block hashes; caught-up reorg check and deeper ancestor recovery. | SQL failed-scan, overlapping worker, lease-expiry and reorg tests. |
+| S10 | Submitted/confirming states; canonical matching receipts before event/playbook completion; hashes persisted before submission; retained unknowns and continued reconciliation after disconnect. | Lost submission, mined revert and canonical receipt regressions. Keeper reports broadcasts separately from fills. |
+| S11 | Recorded atomic reservation batches; intentional upstream-funded legs use NO_COMMITMENT; conservative quantitative funding; real preflight on every step. Definitive reverted arming batches terminate. | Reservation/playbook regressions, including downstream-funding bounds and lost-response recovery. |
+| S12 | Production requires a dedicated relayer, strong cron secret, complete required HTTPS Latch config and stable caller identity. | Configuration validation plus release preflight. Hosted Latch policy, signer isolation and denial/audit evidence require provider-level verification. Keys remain application-managed signers. |
+| S13 | Domain/URI/chain/client/audience/scopes in wallet proof; atomic consumption/session creation; revocation; exact redirect allowlist, S256 PKCE and one-time OAuth codes. | SQL authentication race/replay/isolation, SDK relying-party checks and OAuth/MCP HTTP tests. Supported wallets are EVM EOAs; embedded provider certification remains a pilot check. |
+| S14 | Immutable caller/input-bound GenLayer identities and result hashes; backend checks creator/request/input plus finalized consensus before use. | Interpreter overwrite/type tests and deployed source/schema verification in release procedure. Live consensus evidence belongs in release notes. |
+
+## Discovered gaps addressed
+
+- Owner order reads use the indexed getter and bounded pages rather than an unbounded owner array. Keeper progress survives restarts and scans at most 50 IDs/40 seconds per invocation.
+- Quote/prepare writes use operation generations and leases. Plans retain canonical quote block/hash, exact allowances, amounts, recipient, economic bounds and expiry; the SDK independently decodes both actions.
+- Approval links require separate owner proof, remain bound to their originating connection and become unavailable after revocation. Submitted hashes survive UI reload and report failures.
+- First-party wallet limit preparation and receipt verification remain supported. Public v1 rejects conditional/limit/delegated actions.
+- Schema migration is a single advisory-locked transaction. Reorg checkpoints are validated even when the indexer is caught up.
+- Future OrderBook deployments reject disabled freshness, malformed rounds, zero/future timestamps and invalid feed decimals. The existing live OrderBook retains its immutable bytecode; release checks require its existing nonzero freshness configuration and successful price read.
+- Earlier vault addresses, domain versions and blocks remain in the registry, with owner revoke/release/withdraw controls in the UI.
+
+## Validation and remaining release gates
+
+The release candidate passes 248 core tests, 100 Solidity tests, workspace TypeScript checks, the production Next build and the independent partner browser bundle. Core integration tests use PGlite plus Anvil deployed token/pool/router contracts; their English interpreter response is deterministic. They do not certify live GenLayer consensus or a third-party embedded wallet provider.
+
+The separate optional scoped-delegation/direct-wallet-payout contract design is outside public v1 and remains gated by its own audit and migration. No mainnet asset support or unattended third-party wallet authority is advertised. Provider policy verification, an actual Claude connection, embedded-wallet certification and production operational monitoring require their own evidence; they are not inferred from local tests.

@@ -5,27 +5,12 @@ import {Script, console} from "forge-std/Script.sol";
 import {OrderBook} from "../src/OrderBook.sol";
 import {AgentExecutor} from "../src/AgentExecutor.sol";
 
-/// @notice Put a new AgentExecutor in front of the existing stack.
-///
-/// The executor is the only contract that changed when the vault learned to
-/// hold money for a resting order, and the two intent typehashes moved with it,
-/// so this is a redeploy rather than an upgrade. Everything else stays: the
-/// router, the ten tokens, the forty-five pools and all their liquidity, the
-/// order book and every order resting in it. Rebuilding that would mean seeding
-/// the whole mesh again for a change to one contract.
-///
-/// Three things happen here. The executor is deployed against the existing
-/// router and order book, the ten tokens are registered so trades can still be
-/// valued in dollars, and the order book is pointed at the new address so an
-/// agent-opened limit order keeps working. The registry file is patched in
-/// place, which is what the app and the relayer read.
-///
-/// What does not come across is per-user state: vault balances, capabilities
-/// and spent nonces all live in the old contract's storage. The old withdraw
-/// still works and has no notion of a hold, so anybody with a balance there can
-/// take it back and redeposit. That is stated in the README rather than papered
-/// over, because a migration would need the old contract to have anticipated
-/// this one, and it did not.
+/// @notice Stage an executor v2 against the existing router and OrderBook.
+/// The default preserves live OrderBook authority. EXECUTOR_CUTOVER explicitly
+/// opts into switching it. Owner withdrawals and commitment exits remain in
+/// previous vaults; no balances, holds or signatures migrate automatically.
+/// Prefer packages/core/scripts/release.ts for a recoverable production release
+/// with a private signed-transaction journal and verified versioned metadata.
 contract UpgradeExecutor is Script {
     string constant REGISTRY = "deployments/sepolia.json";
 
@@ -57,13 +42,17 @@ contract UpgradeExecutor is Script {
         for (uint256 i = 0; i < tokens.length; i++) {
             executor.registerToken(tokens[i], uint8(decimals[i]), isStable[i], feeds[i]);
         }
-        // Until this lands the new executor cannot open a limit order, because
-        // createOrderFor only answers to the address recorded here.
-        OrderBook(orderBook).setAgentExecutor(address(executor));
+        // A staged executor cannot place agent limits until the shared book switches.
+        // Stage by default; switch the shared order book only during the coordinated cutover.
+        if (vm.envOr("EXECUTOR_CUTOVER", false)) {
+            OrderBook(orderBook).setAgentExecutor(address(executor));
+        }
 
         vm.stopBroadcast();
 
+        vm.writeJson(vm.toString(previous), REGISTRY, ".previousAgentExecutor");
         vm.writeJson(vm.toString(address(executor)), REGISTRY, ".agentExecutor");
+        vm.writeJson('"2"', REGISTRY, ".executorDomainVersion");
 
         console.log("AgentExecutor:", address(executor));
         console.log("Tokens registered:", tokens.length);

@@ -9,7 +9,13 @@
     "skipLibCheck": true,
     "declaration": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts", "src/**/*.json"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.json",
+    "scripts/**/*.ts"
+  ]
 }

@@ -66,7 +66,7 @@ That judgment gets asked two different questions, and the second one is the one 
 
 Why there is an off-chain relayer at all: a GenLayer contract cannot reach across to Sepolia by itself, and it cannot produce a signature Sepolia would accept. So a finalized GenLayer decision only lands on-chain through a relayer that reads that state and signs the transaction. That relayer is untrusted by design. The on-chain caps bound it even if it is fully compromised, which is the entire point of putting the caps on-chain.
 
-Latch sits over the relayer and keeper as an independent off-chain boundary: key custody, spend limits, credential governance, and an audit trail. It is deliberately not an on-chain authority. The signed caps on Sepolia stay primary, and Latch is the second, separate fence around the machinery that does the signing.
+Relayer and keeper writes use the configured Latch HTTPS RPC transport in production. The application still holds the agent and gas-payer signing keys; Latch policy restrictions, credential governance and audit trails require provider-side verification. Sepolia contracts enforce the signed spend caps. See [public API and custody details](docs/PUBLIC_API.md) and [security remediation](docs/SECURITY_REMEDIATION.md).
 
 ## Live on Sepolia
 

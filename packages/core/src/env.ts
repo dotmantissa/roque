@@ -10,6 +10,7 @@
  * to cross by accident.
  */
 
+import {privateKeyToAccount} from "viem/accounts";
 import { deployedChainId, addresses } from "@roque/shared";
 
 function required(name: string): string {
@@ -73,7 +74,7 @@ export function serverEnv() {
   if (latchRpcUrl && new URL(latchRpcUrl).protocol !== "https:")
     throw new Error("Latch transport must use HTTPS.");
   const relayerKey = normalizeKey(production ? required("RELAYER_PRIVATE_KEY") : optional("RELAYER_PRIVATE_KEY") || required("DEPLOYER_PRIVATE_KEY"));
-  if (production && (relayerKey === agentSignerKey() || relayerKey === optional("DEPLOYER_PRIVATE_KEY")))
+  if (production && (privateKeyToAccount(relayerKey).address.toLowerCase() === addresses.deployer.toLowerCase() || relayerKey === agentSignerKey() || (optional("DEPLOYER_PRIVATE_KEY") && relayerKey === normalizeKey(optional("DEPLOYER_PRIVATE_KEY")))))
     throw new Error("Production requires a dedicated relayer key.");
   const cronSecret = production ? required("CRON_SECRET") : optional("CRON_SECRET", "roque-local-cron");
   if (production && (cronSecret.length < 32 || cronSecret === "roque-local-cron"))
