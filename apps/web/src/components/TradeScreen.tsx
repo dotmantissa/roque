@@ -18,6 +18,7 @@ import { MarketBar } from "./MarketBar";
 import { CommandConsole } from "./CommandConsole";
 import { WalletPanel } from "./WalletPanel";
 import { CapabilityPanel } from "./CapabilityPanel";
+import {LegacyVaultRecovery} from "./LegacyVaultRecovery";
 import { VaultPanel } from "./VaultPanel";
 
 const SLIPPAGE_PRESETS = [
@@ -167,6 +168,7 @@ export function TradeScreen({ mode }: { mode: Mode }) {
               onChanged={refreshAll}
             />
             <VaultPanel vault={vault.data} loading={vault.loading} onSettled={refreshAll} />
+            <LegacyVaultRecovery />
           </div>
         ) : null}
       </div>

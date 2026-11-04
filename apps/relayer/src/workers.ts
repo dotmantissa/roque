@@ -15,6 +15,9 @@
  * in-process alongside the API for a single-command local backend.
  */
 
+import {interpretationTick,walletSettlementTick} from "@roque/core/public-api";
+import {reconcileRelayerAttempts} from "@roque/core/sender";
+import {maintenanceTick} from "../../../packages/core/src/admission.js";
 import {
   keeperTick,
   indexToHead,
@@ -142,7 +145,12 @@ export function startWorkers(logger: Logger = consoleLogger): () => void {
   void runIndexer();
   void runKeeper();
 
+  const runPublic=serial("public",async()=>{await reconcileRelayerAttempts();await walletSettlementTick();await interpretationTick();},logger);
+  const runMaintenance=serial("maintenance",maintenanceTick,logger);
+  void runPublic();void runMaintenance();
   const timers = [
+    setInterval(runPublic,1000),
+    setInterval(runMaintenance,60000),
     setInterval(runKeeper, KEEPER_INTERVAL_MS),
     setInterval(runIndexer, INDEX_INTERVAL_MS),
     setInterval(runJudgment, JUDGMENT_INTERVAL_MS),

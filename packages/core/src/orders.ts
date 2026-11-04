@@ -9,7 +9,7 @@
  * order unlabeled, never wrong.
  */
 
-import { formatUnits, parseEventLogs, type Abi, type Hex } from "viem";
+import { formatUnits, parseEventLogs, BaseError, ContractFunctionRevertedError, type Abi, type Hex } from "viem";
 import { abis, addresses, tokenByAddress } from "@roque/shared";
 import { publicClient } from "./chain.js";
 import { q } from "./db/index.js";
@@ -67,7 +67,7 @@ async function modeByOrderId(user: `0x${string}`): Promise<Map<string, Mode>> {
   const rows = await q<{ mode: Mode; tx_hash: string }>(
     `SELECT mode, tx_hash FROM intents
        WHERE LOWER(user_address)=LOWER($1) AND kind='limit' AND tx_hash IS NOT NULL
-       ORDER BY created_at DESC LIMIT 200`,
+       ORDER BY created_at DESC LIMIT 50`,
     [user],
   );
 
@@ -94,6 +94,7 @@ async function modeByOrderId(user: `0x${string}`): Promise<Map<string, Mode>> {
           const id = (mine?.args as { id?: bigint } | undefined)?.id;
           if (id !== undefined) {
             orderId = id.toString();
+            if(orderIdByTx.size>=1000)orderIdByTx.delete(orderIdByTx.keys().next().value!);
             orderIdByTx.set(txKey, orderId);
           }
         } catch {
@@ -114,17 +115,26 @@ async function modeByOrderId(user: `0x${string}`): Promise<Map<string, Mode>> {
  * figure into human units off the token registry, and tags each with the mode
  * that placed it.
  */
-export async function openOrders(user: `0x${string}`): Promise<OpenOrder[]> {
+export async function openOrdersPage(user: `0x${string}`, before?:string): Promise<{orders:OpenOrder[];nextCursor:string|null}> {
+  if(before!==undefined&&!/^\d{1,10}$/u.test(before))throw new Error("Invalid order page cursor.");
   const client = publicClient();
 
-  const ids = (await client.readContract({
-    address: addresses.orderBook,
-    abi: abis.orderBook as Abi,
-    functionName: "getOrdersByOwner",
-    args: [user],
-  })) as bigint[];
-
-  if (ids.length === 0) return [];
+  // Probe the public indexed getter instead of returning an unbounded owner array.
+  // A Solidity bounds panic proves the end; transport failures propagate.
+  const indexed=[{type:"function",name:"ordersByOwner",stateMutability:"view",inputs:[{type:"address",name:"owner"},{type:"uint256",name:"index"}],outputs:[{type:"uint256",name:""}]}] as const;
+  const at=async(index:bigint):Promise<bigint|null>=>{
+    try{return await client.readContract({address:addresses.orderBook,abi:indexed,functionName:"ordersByOwner",args:[user,index]});}
+    catch(err){if(err instanceof BaseError&&err.walk(e=>e instanceof ContractFunctionRevertedError) instanceof ContractFunctionRevertedError)return null;throw err;}
+  };
+  if(await at(0n)===null)return {orders:[],nextCursor:null};
+  let lower=0n,upper=1n;
+  for(let n=0;n<32;n++){if(await at(upper)===null)break;lower=upper;upper*=2n;if(n===31)throw new Error("Owner order count exceeds the supported bound.");}
+  while(upper-lower>1n){const mid=(lower+upper)/2n;if(await at(mid)===null)upper=mid;else lower=mid;}
+  const end=before===undefined?upper:BigInt(before)<upper?BigInt(before):upper;
+  const start=end>100n?end-100n:0n;
+  const indices=Array.from({length:Number(end-start)},(_,i)=>start+BigInt(i));
+  const ids=await client.multicall({contracts:indices.map(index=>({address:addresses.orderBook,abi:indexed,functionName:"ordersByOwner",args:[user,index]})),allowFailure:false}) as bigint[];
+  if (ids.length === 0) return {orders:[],nextCursor:null};
 
   // One multicall for every order, and the mode lookup alongside it.
   const [raws, modes] = await Promise.all([
@@ -168,5 +178,7 @@ export async function openOrders(user: `0x${string}`): Promise<OpenOrder[]> {
   });
 
   orders.sort((a, b) => Number(b.id) - Number(a.id));
-  return orders;
+  return {orders,nextCursor:start>0n?start.toString():null};
 }
+
+export async function openOrders(user:`0x${string}`):Promise<OpenOrder[]>{return (await openOrdersPage(user)).orders;}

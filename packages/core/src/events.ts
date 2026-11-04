@@ -27,7 +27,7 @@ import { q } from "./db/index.js";
 import { ethUsd } from "./prices.js";
 import { preflightVaultSwap, executeVaultSwap } from "./services.js";
 import { assertVaultFunds } from "./funding.js";
-import { commitmentIdFor, reserve, recoverReservation, release } from "./reservations.js";
+import { commitmentIdFor, reserve, recoverReservation, ReservationFailedError, release } from "./reservations.js";
 
 /**
  * How long an armed order waits between verdicts. A GenLayer adjudication is a
@@ -849,7 +849,10 @@ export async function eventTick(): Promise<EventTickResult> {
     try {
       if(await recoverReservation("event_order",row.id))
         await q("UPDATE event_orders SET status='armed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
-    } catch(err) { result.errors.push(`arming ${row.id}: ${(err as Error).message}`); }
+    } catch(err) {
+      if(err instanceof ReservationFailedError)await q("UPDATE event_orders SET status='failed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
+      result.errors.push(`arming ${row.id}: ${(err as Error).message}`);
+    }
   }
   const submitted=await q<EventOrderRow>(`${SELECT} WHERE status='firing' ORDER BY updated_at LIMIT 20`);
   for(const row of submitted) {

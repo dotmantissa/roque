@@ -1,99 +1,52 @@
-/**
- * The keeper is the muscle behind a resting limit order. A limit order on Roque
- * is a real escrowed position in the OrderBook contract, but nothing fills it on
- * its own; someone has to notice the trigger price is met and send the
- * executeOrder transaction. That someone is this.
- *
- * It is intentionally dumb and safe. It reads open orders from the chain, asks
- * the contract itself whether each is triggered (the contract reads the same
- * Chainlink feed it will use to honour the fill), and for the ones that are, it
- * sends executeOrder from the relayer wallet. Every rule that matters, the
- * trigger, the slippage floor, the expiry, is enforced inside the contract; the
- * keeper cannot make a bad fill happen, it can only pay the gas to attempt a
- * good one. If it is offline, orders simply wait; nothing is lost.
- */
-
-import { encodeFunctionData } from "viem";
-import { addresses, abis } from "@roque/shared";
-import { publicClient, sendRelayerTx } from "./chain.js";
-
+import {encodeFunctionData,parseEventLogs,type Abi,type Hex} from "viem";
+import {addresses,abis} from "@roque/shared";
+import {publicClient,sendRelayerTx} from "./chain.js";
+import {q} from "./db/index.js";
+import {acquireLease,releaseLease} from "./leases.js";
 export interface KeeperResult {
-  scanned: number;
-  triggered: number;
-  filled: { id: string; txHash: string }[];
-  errors: { id: string; error: string }[];
+ scanned:number;triggered:number;
+ submitted:{id:string;txHash:string}[];
+ filled:{id:string;txHash:string}[];
+ errors:{id:string;error:string}[];
 }
-
-// Order status as the contract numbers it: 0 None, 1 Open, 2 Filled, 3 Cancelled.
-const STATUS_OPEN = 1;
-
-/**
- * Run one keeper pass. Walks every order id the book has minted, fills the ones
- * that are open and triggered, and reports what happened. Cheap enough to run on
- * a short timer; the order count on a testnet DEX is small and every check is a
- * view call.
- */
-export async function keeperTick(): Promise<KeeperResult> {
-  const client = publicClient();
-  const result: KeeperResult = { scanned: 0, triggered: 0, filled: [], errors: [] };
-
-  const nextId = (await client.readContract({
-    address: addresses.orderBook,
-    abi: abis.orderBook,
-    functionName: "nextOrderId",
-    args: [],
-  })) as bigint;
-
-  // Order ids run 1..nextId-1. Check each; the open, triggered ones get filled.
-  for (let id = 1n; id < nextId; id++) {
-    result.scanned++;
-
-    const order = (await client.readContract({
-      address: addresses.orderBook,
-      abi: abis.orderBook,
-      functionName: "getOrder",
-      args: [id],
-    })) as { status: number };
-
-    if (order.status !== STATUS_OPEN) continue;
-
-    const triggered = (await client.readContract({
-      address: addresses.orderBook,
-      abi: abis.orderBook,
-      functionName: "isTriggered",
-      args: [id],
-    })) as boolean;
-
-    if (!triggered) continue;
-    result.triggered++;
-
-    try {
-      const txHash = await fillOrder(id);
-      result.filled.push({ id: id.toString(), txHash });
-    } catch (err) {
-      // A revert here is usually a race: another filler got it first, or the
-      // price slipped back across the trigger between the check and the send.
-      // Neither is fatal; log it and move on to the next order.
-      result.errors.push({ id: id.toString(), error: (err as Error).message });
-    }
+/** A persistent bounded circular scan; a hash alone is a submission. */
+export async function keeperTick():Promise<KeeperResult>{
+ const result:KeeperResult={scanned:0,triggered:0,submitted:[],filled:[],errors:[]};
+ const key=`keeper:${addresses.orderBook.toLowerCase()}`;
+ const lease=await acquireLease(key);if(!lease)return result;
+ try{
+  const client=publicClient();
+  const nextId=await client.readContract({address:addresses.orderBook,abi:abis.orderBook,functionName:"nextOrderId"}) as bigint;
+  await q("INSERT INTO keeper_progress(key,next_order_id) VALUES($1,1) ON CONFLICT DO NOTHING",[key]);
+  const row=(await q<{next_order_id:string}>("SELECT next_order_id FROM keeper_progress WHERE key=$1",[key]))[0];
+  let cursor=BigInt(row.next_order_id);if(cursor>=nextId)cursor=1n;
+  const started=Date.now();
+  while(cursor<nextId&&result.scanned<50&&Date.now()-started<40000){
+   const id=cursor++;result.scanned++;
+   try{
+    const order=await client.readContract({address:addresses.orderBook,abi:abis.orderBook,functionName:"getOrder",args:[id]}) as {status:number};
+    if(Number(order.status)!==1)continue;
+    const triggered=await client.readContract({address:addresses.orderBook,abi:abis.orderBook,functionName:"isTriggered",args:[id]});
+    if(!triggered)continue;result.triggered++;
+    // Identical calldata maps to the same durable attempt across all scans.
+    const data=encodeFunctionData({abi:abis.orderBook,functionName:"executeOrder",args:[id]});
+    const base=`${key}:order:${id}`;
+    const prior=(await q<{id:string;status:string}>("SELECT id,status FROM execution_attempts WHERE id=$1 OR id LIKE $2 ORDER BY created_at DESC LIMIT 1",[base,`${base}:retry:%`]))[0];
+    // A definitively mined revert permits a fresh gas transaction; unknowns retain their hash.
+    const operationId=prior?.status==='mined_revert'?`${base}:retry:${lease.generation}`:prior?.id??base;
+    const hash=await sendRelayerTx({to:addresses.orderBook,data,operationId});
+    result.submitted.push({id:id.toString(),txHash:hash});
+    try{
+     const receipt=await client.getTransactionReceipt({hash});
+     const block=await client.getBlock({blockNumber:receipt.blockNumber});
+     if(receipt.status==='success'&&block.hash===receipt.blockHash&&await client.getBlockNumber()-receipt.blockNumber+1n>=3n){
+      const fill=parseEventLogs({abi:abis.orderBook as Abi,eventName:'OrderFilled',logs:receipt.logs.filter(l=>l.address.toLowerCase()===addresses.orderBook.toLowerCase())}).some(l=>(l.args as {id?:bigint}).id===id);
+      if(fill)result.filled.push({id:id.toString(),txHash:hash});
+     }
+    }catch{/* Pending or unreadable receipts remain submitted. */}
+   }catch{result.errors.push({id:id.toString(),error:'Order check or submission unavailable; retry on the next scan.'});}
   }
-
+  await q(`UPDATE keeper_progress SET next_order_id=$2 WHERE key=$1 AND EXISTS(SELECT 1 FROM worker_leases WHERE key=$1 AND owner=$3 AND generation=$4 AND expires_at>now())`,[key,cursor>=nextId?1n:cursor,lease.owner,lease.generation]);
   return result;
-}
-
-/**
- * Send executeOrder for one id from the relayer wallet, returning the tx hash.
- * Behind the shared send queue, because the same wallet is also filling event
- * orders, advancing playbooks and locking vault money, and two of those sending
- * at once used to collide on the nonce and look like a refused fill.
- */
-async function fillOrder(id: bigint): Promise<`0x${string}`> {
-  return sendRelayerTx({
-    to: addresses.orderBook,
-    data: encodeFunctionData({
-      abi: abis.orderBook,
-      functionName: "executeOrder",
-      args: [id],
-    }),
-  });
+ }finally{await releaseLease(lease).catch(()=>{});}
 }

@@ -38,7 +38,7 @@ vi.mock("../src/intents.js", () => ({
   getCommitment: state.getCommitment,
 }));
 
-const { reserve, release, heldByToken, availability, assertWithdrawable } = await import(
+const { reserve, recoverReservation, release, heldByToken, availability, assertWithdrawable } = await import(
   "../src/reservations.js"
 );
 const { assertVaultFunds, vaultFundingNeeds } = await import("../src/funding.js");
@@ -494,4 +494,15 @@ describe("what the vault is actually on the hook for", () => {
     expect(needs[0]!.raw).toBe(0n);
     expect(needs[0]!.needsSome).toBe(true);
   });
+});
+
+it("terminally rejects a definitively reverted arming batch without signing again",async()=>{
+ state.q.mockImplementation(async(text:string)=>{
+  if(text.startsWith('SELECT id,payload FROM reservation_batches'))return [{id:'batch-reverted',payload:{prepared:[],intents:[]}}];
+  if(text.startsWith('SELECT status FROM execution_attempts'))return [{status:'mined_revert'}];
+  if(text.startsWith('UPDATE reservation_batches'))return [];
+  throw new Error('Unexpected recovery query');
+ });
+ await expect(recoverReservation('event_order','order')).rejects.toThrow('recorded hold reverted');
+ expect(state.lockCommitments).not.toHaveBeenCalled();
 });

@@ -376,31 +376,12 @@ ALTER TABLE event_orders ADD CONSTRAINT event_orders_status_check
 ALTER TABLE vault_reservations ADD COLUMN IF NOT EXISTS commitment_id TEXT;
 `;
 
-/**
- * Postgres errors that mean "somebody else just did this". CREATE TABLE IF NOT
- * EXISTS is not actually safe to run concurrently: two instances booting
- * together can both pass the existence check and then collide on the catalogue,
- * which surfaces as a duplicate relation, type or unique-violation rather than
- * the no-op the clause implies. The same goes for dropping and re-adding a check
- * constraint. Every statement here is idempotent by intent, so treating these as
- * success is honest rather than a shrug.
- */
-const ALREADY_THERE = /42P07|42710|42P16|23505|already exists|duplicate key/i;
-
 /** Create every table if it is not already there. Safe to call on each boot. */
 export async function ensureSchema(): Promise<void> {
-  // Neon's HTTP driver runs one statement per call, so split the DDL and run the
-  // pieces in order. Splitting on a blank-line-preceded semicolon keeps the
-  // CHECK-clause semicolons inside a statement from tripping us up.
+  // One transaction takes a migration lock and applies the ordered statements.
   const statements = (SCHEMA_SQL + "\n" + migration0002).split(/;\s*\n/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  for (const stmt of statements) {
-    try {
-      await q(stmt);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!ALREADY_THERE.test(message)) throw err;
-    }
-  }
+  const db=sql();
+  await db.transaction([db.query("SELECT pg_advisory_xact_lock(7266785)"),...statements.map(stmt=>db.query(stmt))]);
 }

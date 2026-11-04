@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     # The route may run for up to 300s, so allow for one full pass plus the
     # handshake rather than cutting it off at the interval.
-    timeout-minutes: 7
+    timeout-minutes: 12
     steps:
       - name: Run the judgment tick
         env:
@@ -45,3 +45,13 @@ jobs:
             --retry 2 --retry-all-errors --max-time 320 \
             --header "Authorization: Bearer $CRON_SECRET" \
             https://roque-dex.vercel.app/api/cron/judgment
+
+      - name: Recover public jobs and wallet settlements
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$CRON_SECRET"
+          curl --fail --show-error --silent \
+            --retry 2 --retry-all-errors --max-time 320 \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            https://roque-dex.vercel.app/api/cron/public

@@ -213,6 +213,9 @@ export const api = {
     });
   },
 
+  prepareLimit(input:{id:string;tokenIn:string;tokenOut:string;amountInRaw:string;minAmountOutRaw:string;triggerPrice:string;triggerAbove:boolean;expiry:string}) {
+    return request("/swap/prepare-limit",{method:"POST",headers:autonomousSession ? bearer(autonomousSession.token) : undefined,body:JSON.stringify(input)});
+  },
   confirmSwap(id: string, txHash: string) {
     return request<{ ok: true }>("/swap/confirm", {
       method: "POST",

@@ -8,7 +8,7 @@ import path from "node:path";
  * way whether it runs in a serverless route here or the standalone relayer.
  */
 const nextConfig: NextConfig = {
-  transpilePackages: ["@roque/core", "@roque/shared"],
+  transpilePackages: ["@roque/core", "@roque/shared", "@roque/sdk", "@roque/mcp", "@roque/relayer"],
   // We live two levels down from the workspace root. Point Next at that root so
   // it traces files against the real monorepo instead of guessing from whichever
   // lockfile it stumbles on first, which keeps the workspace packages in the

@@ -23,7 +23,8 @@
     "./keeper": "./src/keeper.ts",
     "./db": "./src/db/index.ts",
     "./public-api": "./src/public-api.ts",
-    "./sender": "./src/sender.ts"
+    "./sender": "./src/sender.ts",
+    "./admission": "./src/admission.ts"
   },
   "scripts": {
     "migrate": "tsx src/db/migrate.ts",

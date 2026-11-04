@@ -9,6 +9,7 @@ export const walletRouterAbi = parseAbi([
 export interface WalletTrade {
  tokenIn: string; tokenOut: string; amountInRaw: string; minAmountOutRaw: string; recipient: string;
  data?: Hex; deadline?: number;
+ kind?:"swap"|"limit";triggerPrice?:string;triggerAbove?:boolean;expiry?:string;
 }
 const same = (a:string|undefined|null,b:string)=>a?.toLowerCase()===b.toLowerCase();
 export async function inspectWalletTx(hash:Hex,owner:Hex,plan:WalletTrade) {
@@ -25,6 +26,7 @@ export async function inspectWalletTx(hash:Hex,owner:Hex,plan:WalletTrade) {
  return tx;
 }
 export async function verifyWalletTrade(hash:Hex,owner:Hex,plan:WalletTrade) {
+ if(plan.kind==="limit") return verifyWalletLimit(hash,owner,plan);
  await inspectWalletTx(hash,owner,plan);
  const client=publicClient();
  const receipt=await client.getTransactionReceipt({hash});
@@ -39,6 +41,27 @@ export async function verifyWalletTrade(hash:Hex,owner:Hex,plan:WalletTrade) {
  if(!event) throw new Error("Matching settlement event is missing.");
  return {status:depth>=3n?"confirmed":"confirming",txHash:hash,blockNumber:receipt.blockNumber.toString(),
    blockHash:receipt.blockHash,confirmations:depth.toString(),amountOutRaw:event.args.amountOut.toString(),recipient:plan.recipient};
+}
+
+/** Creation confirms escrow; it does not claim that a resting limit has filled. */
+async function verifyWalletLimit(hash:Hex,owner:Hex,plan:WalletTrade) {
+ const {abis}=await import("@roque/shared");
+ const client=publicClient(),tx=await client.getTransaction({hash});
+ if(tx.chainId!==deployedChainId||!same(tx.from,owner)||!same(tx.to,addresses.orderBook)||tx.value!==0n) throw new Error("Transaction does not belong to this wallet limit.");
+ const decoded=decodeFunctionData({abi:abis.orderBook,data:tx.input});
+ const args=decoded.args as readonly unknown[];
+ if(decoded.functionName!=="createOrder"||!same(String(args[0]),plan.tokenIn)||!same(String(args[1]),plan.tokenOut)||
+   args[2]!==BigInt(plan.amountInRaw)||args[3]!==BigInt(plan.minAmountOutRaw)||args[4]!==BigInt(plan.triggerPrice!)||
+   args[5]!==plan.triggerAbove||args[6]!==BigInt(plan.expiry!)) throw new Error("Transaction differs from reviewed limit.");
+ const receipt=await client.getTransactionReceipt({hash});
+ if((await client.getBlock({blockNumber:receipt.blockNumber})).hash!==receipt.blockHash) throw new Error("Transaction observation was orphaned.");
+ const depth=await client.getBlockNumber()-receipt.blockNumber+1n;
+ if(receipt.status!=="success") throw new Error(depth>=3n?"Transaction reverted.":"Revert is still confirming.");
+ const events=parseEventLogs({abi:abis.orderBook,eventName:"OrderCreated",logs:receipt.logs});
+ const event=events.find(e=>{const a=(e as unknown as {args:unknown}).args as {owner:string;tokenIn:string;tokenOut:string;amountIn:bigint;minAmountOut:bigint;triggerPrice:bigint;triggerAbove:boolean;expiry:bigint};
+   return same(e.address,addresses.orderBook)&&same(a.owner,owner)&&same(a.tokenIn,plan.tokenIn)&&same(a.tokenOut,plan.tokenOut)&&a.amountIn===BigInt(plan.amountInRaw)&&a.minAmountOut===BigInt(plan.minAmountOutRaw)&&a.triggerPrice===BigInt(plan.triggerPrice!)&&a.triggerAbove===plan.triggerAbove&&a.expiry===BigInt(plan.expiry!);});
+ if(!event) throw new Error("Matching order creation event is missing.");
+ return {status:depth>=3n?"confirmed":"confirming",txHash:hash,blockNumber:receipt.blockNumber.toString(),blockHash:receipt.blockHash,confirmations:depth.toString(),amountOutRaw:"0",recipient:owner};
 }
 
 /** Reconcile a named autonomous business operation from its durable signed attempt. */

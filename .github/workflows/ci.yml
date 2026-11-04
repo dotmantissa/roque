@@ -42,8 +42,7 @@ jobs:
 
       - name: Enable pinned pnpm
         run: |
-          corepack enable
-          corepack prepare pnpm@11.2.2 --activate
+          npm install --global pnpm@11.2.2
 
       - name: Locate pnpm store
         id: pnpm-store
@@ -60,6 +59,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Set up Foundry for the real wallet EVM regression
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.5.1
+          cache: true
+
+      - name: Build isolated EVM fixtures
+        run: forge build --root contracts
 
       - name: Typecheck, test, and build
         run: pnpm check

@@ -7,6 +7,9 @@
  */
 
 import { NextResponse } from "next/server";
+import {QuotaError,admitTransport} from "@roque/core/admission";
+import {ZodError} from "zod";
+import {PublicApiError} from "@roque/core/public-api";
 import { ApiError } from "@roque/core/api";
 
 // These routes touch node:crypto, the Neon driver and the agent signer, so they
@@ -15,9 +18,13 @@ export const runtime = "nodejs";
 
 export async function run<T>(fn: () => Promise<T> | T): Promise<NextResponse> {
   try {
+    admitTransport("next-api");
     const data = await fn();
     return NextResponse.json(data);
   } catch (err) {
+    if(err instanceof PublicApiError) return NextResponse.json({error:{code:err.code,message:err.message}},{status:err.status});
+    if(err instanceof ZodError) return NextResponse.json({error:"Invalid request fields."},{status:400});
+    if(err instanceof QuotaError) return NextResponse.json({error:"Request quota exceeded."},{status:429,headers:{"Retry-After":"60"}});
     if (err instanceof ApiError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
@@ -30,11 +37,11 @@ export async function run<T>(fn: () => Promise<T> | T): Promise<NextResponse> {
 
 /** Parse a JSON body without throwing on an empty one. */
 export async function body(req: Request): Promise<unknown> {
-  try {
-    return await req.json();
-  } catch {
-    return {};
-  }
+  const reader=req.body?.getReader();if(!reader)return {};
+  let text="",size=0;const decoder=new TextDecoder();
+  for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384){await reader.cancel();throw new ApiError(413,"Request body is too large.");}text+=decoder.decode(value,{stream:true});}
+  text+=decoder.decode();
+  try{return JSON.parse(text);}catch{throw new ApiError(400,"Invalid JSON body.");}
 }
 
 /** Pull an opaque owner-session token from a standard Authorization header. */

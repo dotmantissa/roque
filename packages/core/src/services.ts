@@ -12,6 +12,7 @@
  * point does a language model's opinion reach for funds directly.
  */
 
+import {percentageOf} from "./validation.js";
 import { verifyWalletTrade, type WalletTrade } from "./settlement.js";
 import { randomUUID } from "node:crypto";
 import { parseUnits, formatUnits } from "viem";
@@ -96,9 +97,7 @@ async function resolveAmount(
       lockedBalance(user, tokenIn.address),
     ]);
     const free = raw > locked ? raw - locked : 0n;
-    const base = Number(formatUnits(free, tokenIn.decimals));
-    const amount = (base * percent) / 100;
-    return amount.toString();
+    return formatUnits(percentageOf(free,interp.amount),tokenIn.decimals);
   }
 
   throw new Error(
@@ -210,10 +209,7 @@ export async function preflightVaultSwap(params: {
     if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
       throw new Error("A percentage amount has to be between 0 and 100.");
     }
-    amount = humanAmount(
-      (Number(formatUnits(spendable, tokenIn.decimals)) * percent) / 100,
-      tokenIn.decimals,
-    );
+    amount = formatUnits(percentageOf(spendable,params.amount),tokenIn.decimals);
   }
 
   const amountInRaw = parseUnits(amount, tokenIn.decimals);

@@ -40,9 +40,20 @@ async function signAndBroadcast(attempt:Attempt,lease:NonNullable<Awaited<Return
  const wallet=relayerWallet();
  let raw=attempt.raw_tx, hash=attempt.tx_hash;
  if(!raw || !hash) {
-   const request=await wallet.prepareTransactionRequest({account:wallet.account!,chain:wallet.chain,
-     to:attempt.target,data:attempt.calldata,nonce:Number(attempt.nonce),value:0n});
-   raw=await wallet.signTransaction(request as Parameters<typeof wallet.signTransaction>[0]);
+   try {
+    const request=await wallet.prepareTransactionRequest({account:wallet.account!,chain:wallet.chain,
+      to:attempt.target,data:attempt.calldata,nonce:Number(attempt.nonce),value:0n});
+    raw=await wallet.signTransaction(request as Parameters<typeof wallet.signTransaction>[0]);
+   } catch(err) {
+    // No signed bytes were persisted or broadcast. Roll back only the trailing reservation under its live lease.
+    // A stale worker or a nontrailing hole cannot discard another sender's progress.
+    await q(`WITH freed AS (DELETE FROM execution_attempts WHERE id=$1 AND raw_tx IS NULL AND tx_hash IS NULL
+      AND EXISTS(SELECT 1 FROM worker_leases WHERE key=$2 AND owner=$3 AND generation=$4 AND expires_at>now())
+      AND EXISTS(SELECT 1 FROM relayer_senders s WHERE s.chain_id=execution_attempts.chain_id AND s.sender=execution_attempts.sender AND s.next_nonce=execution_attempts.nonce+1)
+      RETURNING chain_id,sender,nonce)
+      UPDATE relayer_senders s SET next_nonce=f.nonce FROM freed f WHERE s.chain_id=f.chain_id AND s.sender=f.sender`,[attempt.id,lease.key,lease.owner,lease.generation]).catch(()=>{});
+    throw err;
+   }
    hash=keccak256(raw);
    const persisted=await q(`UPDATE execution_attempts SET raw_tx=$2,tx_hash=$3,status='signed',updated_at=now()
      WHERE id=$1 AND raw_tx IS NULL AND EXISTS(SELECT 1 FROM worker_leases WHERE key=$4 AND owner=$5 AND generation=$6 AND expires_at>now()) RETURNING id`,

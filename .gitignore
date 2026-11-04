@@ -9,7 +9,7 @@ node_modules/
 # foundry
 contracts/out/
 contracts/cache/
-contracts/broadcast/**/dry-run/
+contracts/broadcast/
 contracts/.gas-snapshot
 
 # next / vercel
@@ -33,3 +33,7 @@ coverage/
 .venv/
 .ruff_cache/
 .pytest_cache/
+
+# Generated independent partner browser bundle
+/examples/partner-app/sdk.js
+.vercel

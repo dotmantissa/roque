@@ -4,6 +4,7 @@ import TestTokenAbi from "./abis/TestToken.json" assert { type: "json" };
 import LiquidityPoolAbi from "./abis/LiquidityPool.json" assert { type: "json" };
 import DEXRouterAbi from "./abis/DEXRouter.json" assert { type: "json" };
 import OrderBookAbi from "./abis/OrderBook.json" assert { type: "json" };
+import LegacyExecutorAbi from "./abis/AgentExecutorV1.json" assert { type: "json" };
 import AgentExecutorAbi from "./abis/AgentExecutor.json" assert { type: "json" };
 import FaucetRouterAbi from "./abis/FaucetRouter.json" assert { type: "json" };
 
@@ -41,6 +42,13 @@ export const abis = {
   agentExecutor: AgentExecutorAbi,
   faucetRouter: FaucetRouterAbi,
 } as const;
+
+
+/** Old vaults are immutable custody locations; retain owner exits through every redeployment. */
+const history=deployment as unknown as {legacyExecutors?:Array<{address:string;domainVersion:string;deploymentBlock?:string}>;previousAgentExecutor?:string};
+export const legacyExecutors=(history.legacyExecutors??(history.previousAgentExecutor?[{address:history.previousAgentExecutor,domainVersion:"1"}]:[]))
+ .filter(e=>e.address.toLowerCase()!==addresses.agentExecutor.toLowerCase())
+ .map(e=>({...e,address:hex(e.address),abi:LegacyExecutorAbi}));
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
 

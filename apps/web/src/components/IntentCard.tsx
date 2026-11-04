@@ -147,6 +147,7 @@ export function IntentCard({
 
         if (isLimit) {
           const order = buildLimitOrder(interp, amount, ethUsd, prices, slippageBps);
+          await api.prepareLimit({id:result.id,tokenIn:order.tokenIn,tokenOut:order.tokenOut,amountInRaw:order.amountInRaw.toString(),minAmountOutRaw:order.minAmountOutRaw.toString(),triggerPrice:order.triggerPrice.toString(),triggerAbove:order.triggerAbove,expiry:order.expiry.toString()});
           hash = await copilotLimitOrder(client, address, order);
         } else {
           const prep = await api.prepareSwap({

@@ -7,7 +7,7 @@
  * throws an ApiError the transport layer turns into a status code.
  */
 
-import { admit } from "./admission.js";
+import { admit, costlyAdmission } from "./admission.js";
 import { decimal, rawAmount } from "./validation.js";
 import { z } from "zod";
 import { formatUnits } from "viem";
@@ -20,7 +20,7 @@ import {
   intentHistory,
   tradeHistory,
 } from "./services.js";
-import { openOrders } from "./orders.js";
+import { openOrders, openOrdersPage } from "./orders.js";
 import { heldByToken } from "./reservations.js";
 import { quoteSwap, poolReserves } from "./quote.js";
 import { ethUsd, allTokenUsd, tokenUsd } from "./prices.js";
@@ -87,6 +87,13 @@ export class ApiError extends Error {
   }
 }
 
+function refusal(err:unknown):ApiError {
+ const message=err instanceof Error?err.message:"";
+ if(!(err instanceof Error)||err.name!=="Error"||message.length>500||/https?:|postgres|rpc|fetch failed|column .* relation|syntax error|connection|timeout|0x[a-fA-F0-9]{64}/iu.test(message))
+   return new ApiError(503,"Request could not be completed. Check transaction status before retrying.");
+ return new ApiError(400,message);
+}
+
 const address = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/u, "That does not look like an Ethereum address.")
@@ -124,6 +131,8 @@ async function requireAutonomousOwner(
   if (requestedOwner && owner.toLowerCase() !== requestedOwner.toLowerCase()) {
     throw new ApiError(403, "This wallet session does not own the requested vault.");
   }
+  await admit("global:private-api",600);
+  await admit(`owner:${owner}`,120);
   return owner;
 }
 
@@ -135,6 +144,7 @@ const authChallengeSchema = z.object({ owner: address });
 
 export async function handleAuthChallenge(body: unknown) {
   const input = parse(authChallengeSchema, body);
+  await admit("global:auth-challenge",100);
   return issueWalletChallenge(input.owner);
 }
 
@@ -166,7 +176,7 @@ const interpretSchema = z.object({
 export async function handleInterpret(body: unknown, sessionToken?: string) {
   const input = parse(interpretSchema, body);
   const owner = await requireAutonomousOwner(sessionToken, input.user);
-  await admit(`interpret:${owner}`, 10);
+  await costlyAdmission(`interpret:${owner}`);
   return interpretCommand({ user: owner, mode: input.mode, command: input.command });
 }
 
@@ -259,6 +269,23 @@ export async function handlePrepareSwap(body: unknown, sessionToken?: string) {
   };
 }
 
+export async function handlePrepareLimit(body:unknown,sessionToken?:string) {
+ const input=parse(z.object({id:z.string().min(1).max(128),tokenIn:address,tokenOut:address,
+   amountInRaw:rawAmount,minAmountOutRaw:rawAmount,triggerPrice:rawAmount,triggerAbove:z.boolean(),expiry:rawAmount}).strict(),body);
+ const owner=await requireAutonomousOwner(sessionToken);
+ const rows=await dbQuery<{interpretation:unknown}>("SELECT interpretation FROM intents WHERE id=$1 AND LOWER(user_address)=LOWER($2) AND mode='copilot' AND kind='limit' AND status='ready'",[input.id,owner]);
+ const {interpretationSchema}=await import("./validation.js");const interp=interpretationSchema.parse(rows[0]?.interpretation);
+ const {requireToken}=await import("@roque/shared");const {parseUnits}=await import("viem");
+ if(!interp.ok||interp.kind!=="limit"||requireToken(interp.tokenIn).address.toLowerCase()!==input.tokenIn.toLowerCase()||requireToken(interp.tokenOut).address.toLowerCase()!==input.tokenOut.toLowerCase()||
+   parseUnits(interp.triggerPrice,8)!==BigInt(input.triggerPrice)||interp.triggerAbove!==input.triggerAbove||BigInt(input.amountInRaw)<=0n||BigInt(input.minAmountOutRaw)<=0n||
+   (!interp.amountIsPercent&&parseUnits(interp.amount,requireToken(interp.tokenIn).decimals)!==BigInt(input.amountInRaw))||
+   BigInt(input.expiry)<=BigInt(Math.floor(Date.now()/1000))||BigInt(input.expiry)>BigInt(Math.floor(Date.now()/1000)+7*86400+60)) throw new ApiError(400,"Limit differs from its interpretation.");
+ const {id,...fields}=input;
+ const saved=await dbQuery("UPDATE intents SET prepared_plan=$3::jsonb WHERE id=$1 AND LOWER(user_address)=LOWER($2) AND status='ready' RETURNING id",[id,owner,JSON.stringify({...fields,kind:"limit",recipient:owner})]);
+ if(saved.length!==1) throw new ApiError(409,"Intent is no longer ready.");
+ return {ok:true};
+}
+
 const confirmSchema = z.object({
   id: z.string().min(1),
   txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/u, "That is not a transaction hash."),
@@ -318,7 +345,7 @@ export async function handleExecute(body: unknown, sessionToken?: string) {
   } catch (err) {
     // These are the friendly, user-facing refusals executeAutonomous raises
     // before it ever touches the chain; surface them as a 400, not a 500.
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -395,9 +422,10 @@ export async function handleActivity(userRaw: string, limit = 25, sessionToken?:
 }
 
 /** Every limit order the user still has resting on-chain, tagged by mode. */
-export async function handleOpenOrders(userRaw: string) {
+export async function handleOpenOrders(userRaw: string, before?:string) {
   const user = parse(address, userRaw);
-  return { orders: await openOrders(user) };
+  if(before!==undefined)parse(z.string().regex(/^\d{1,10}$/u),before);
+  return openOrdersPage(user,before);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -522,7 +550,7 @@ export async function handleCreateEventOrder(body: unknown, sessionToken?: strin
   try {
     return { order: await createEventOrder({ ...input, user: owner }) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -557,7 +585,7 @@ export async function handleArmEventOrder(body: unknown, sessionToken?: string) 
   try {
     return { order: await armEventOrder(id, owner) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -567,7 +595,7 @@ export async function handleCancelEventOrder(body: unknown, sessionToken?: strin
   try {
     return { order: await cancelEventOrder(id, owner) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -591,7 +619,7 @@ export async function handleCreatePlaybook(body: unknown, sessionToken?: string)
   try {
     return { playbook: await createPlaybook({ ...input, user: owner }) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -619,7 +647,7 @@ export async function handleUpdatePlaybook(body: unknown, sessionToken?: string)
     const { id, ...patch } = input;
     return { playbook: await updatePlaybook(id, owner, patch) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -630,7 +658,7 @@ export async function handleArmPlaybook(body: unknown, sessionToken?: string) {
   try {
     return { playbook: await armPlaybook(id, owner) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -657,7 +685,7 @@ export async function handleCancelPlaybook(body: unknown, sessionToken?: string)
   try {
     return { playbook: await cancelPlaybook(id, owner) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -706,7 +734,7 @@ export async function handlePublishShare(body: unknown, sessionToken?: string) {
         : await sharePlaybook(input.id, owner, { title: input.title, note: input.note });
     return { share };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -730,7 +758,7 @@ export async function handleForkShare(body: unknown, sessionToken?: string) {
       expiresInDays: input.expiresInDays,
     });
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -758,7 +786,7 @@ export async function handleAcceptProposal(body: unknown, sessionToken?: string)
   try {
     return await acceptProposal(id, owner);
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 
@@ -768,7 +796,7 @@ export async function handleDismissProposal(body: unknown, sessionToken?: string
   try {
     return { proposal: await dismissProposal(id, owner) };
   } catch (err) {
-    throw new ApiError(400, (err as Error).message);
+    throw refusal(err);
   }
 }
 

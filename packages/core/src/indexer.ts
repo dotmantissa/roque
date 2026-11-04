@@ -54,16 +54,11 @@ export async function indexOnce(): Promise<ScanResult> {
   const client = publicClient();
   const latest = (await client.getBlockNumber()) - 12n;
 
-  const bookmark = await readBookmark();
-  const fromBlock = bookmark + 1n;
-  if (fromBlock > latest) {
-    return { fromBlock, toBlock: bookmark, rows: 0 };
-  }
-  const toBlock = fromBlock + MAX_RANGE - 1n > latest ? latest : fromBlock + MAX_RANGE - 1n;
-
   const lease=await acquireLease(`index:${BOOKMARK_KEY}`,120);
-  if(!lease) return {fromBlock,toBlock:bookmark,rows:0};
+  if(!lease) return {fromBlock:latest+1n,toBlock:latest,rows:0};
   try {
+    const bookmark=await readBookmark(),fromBlock=bookmark+1n;
+    const toBlock=fromBlock+MAX_RANGE-1n>latest?latest:fromBlock+MAX_RANGE-1n;
     const checkpoint=await q<{block_hash:string}>("SELECT block_hash FROM indexer_blocks WHERE deployment=$1 AND block_number=$2",[BOOKMARK_KEY,bookmark.toString()]);
     if(checkpoint[0]) {
       const canonical=await client.getBlock({blockNumber:bookmark});
@@ -74,7 +69,7 @@ export async function indexOnce(): Promise<ScanResult> {
           if((await client.getBlock({blockNumber:BigInt(candidate.block_number)})).hash===candidate.block_hash) {ancestor=BigInt(candidate.block_number);break;}
         }
         const rewind=ancestor+1n;
-        await q(`WITH owned AS (SELECT 1 FROM worker_leases WHERE key=$3 AND owner=$4 AND generation=$5 AND expires_at>now()),
+        await q(`WITH owned AS (SELECT 1 FROM worker_leases WHERE key=$3 AND owner=$4 AND generation=$5 AND expires_at>now() AND EXISTS(SELECT 1 FROM indexer_state WHERE key=$2 AND value=$7)),
           removed AS (DELETE FROM trades WHERE block_number >= $1 AND deployment=$2 AND EXISTS(SELECT 1 FROM owned)),
           blocks AS (DELETE FROM indexer_blocks WHERE deployment=$2 AND block_number >= $1 AND EXISTS(SELECT 1 FROM owned))
           UPDATE indexer_state SET value=$6 WHERE key=$2 AND value=$7 AND EXISTS(SELECT 1 FROM owned)`,
@@ -82,7 +77,8 @@ export async function indexOnce(): Promise<ScanResult> {
         return {fromBlock:rewind,toBlock:rewind-1n,rows:0};
       }
     }
-    const rows=await scanRange(fromBlock,toBlock);
+    if(fromBlock>latest) return {fromBlock,toBlock:bookmark,rows:0};
+    const rows=await scanRange(fromBlock,toBlock,lease);
     const block=await client.getBlock({blockNumber:toBlock});
     await q("INSERT INTO indexer_blocks(deployment,block_number,block_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",[BOOKMARK_KEY,toBlock.toString(),block.hash]);
     if(!await claimWindow(bookmark,toBlock,lease)) throw new Error("Indexer lost checkpoint ownership.");
@@ -111,7 +107,7 @@ export async function indexToHead(): Promise<number> {
 // The actual scan: pull each contract's logs and fold them into trade rows
 // ─────────────────────────────────────────────────────────────
 
-async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
+async function scanRange(fromBlock: bigint, toBlock: bigint,lease:NonNullable<Awaited<ReturnType<typeof acquireLease>>>): Promise<number> {
   const client = publicClient();
 
   const [agentSwaps, orderCreated, orderFilled, orderCancelled, routerSwaps] = await Promise.all([
@@ -185,7 +181,7 @@ async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
       logIndex: log.logIndex,
       blockNumber: log.blockNumber,
       blockTime: times.get(log.blockNumber),
-    });
+    },lease);
   }
 
   // Copilot swaps go straight through the router from the user's own wallet. The
@@ -220,7 +216,7 @@ async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
       logIndex: log.logIndex,
       blockNumber: log.blockNumber,
       blockTime: times.get(log.blockNumber),
-    });
+    },lease);
   }
 
   // A resting limit order opening. Owner is the user whether it came from a
@@ -251,7 +247,7 @@ async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
       logIndex: log.logIndex,
       blockNumber: log.blockNumber,
       blockTime: times.get(log.blockNumber),
-    });
+    },lease);
   }
 
   // A fill. The event names the filler, not the owner, and carries no token
@@ -275,7 +271,7 @@ async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
       logIndex: log.logIndex,
       blockNumber: log.blockNumber,
       blockTime: times.get(log.blockNumber),
-    });
+    },lease);
   }
 
   // A cancellation. Same story: read the order back for the owner and pair.
@@ -296,7 +292,7 @@ async function scanRange(fromBlock: bigint, toBlock: bigint): Promise<number> {
       logIndex: log.logIndex,
       blockNumber: log.blockNumber,
       blockTime: times.get(log.blockNumber),
-    });
+    },lease);
   }
 
   return written;
@@ -323,12 +319,13 @@ interface TradeRow {
 }
 
 /** Insert one trade row, ignoring a replay of the same log. Returns 1 if new. */
-async function insertTrade(row: TradeRow): Promise<number> {
+async function insertTrade(row: TradeRow,lease:NonNullable<Awaited<ReturnType<typeof acquireLease>>>): Promise<number> {
   const rows = await q(
     `INSERT INTO trades
        (kind, user_address, token_in, token_out, amount_in, amount_out, usd_value,
         order_id, price, tx_hash, log_index, block_number, block_time, deployment)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+     WHERE EXISTS(SELECT 1 FROM worker_leases WHERE key=$15 AND owner=$16 AND generation=$17 AND expires_at>now())
      ON CONFLICT (tx_hash, log_index) DO NOTHING
      RETURNING id`,
     [
@@ -345,7 +342,7 @@ async function insertTrade(row: TradeRow): Promise<number> {
       row.logIndex,
       row.blockNumber.toString(),
       row.blockTime ? new Date(row.blockTime * 1000).toISOString() : null,
-      BOOKMARK_KEY,
+      BOOKMARK_KEY,lease.key,lease.owner,lease.generation,
     ],
   );
   return rows.length;

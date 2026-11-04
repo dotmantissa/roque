@@ -31,7 +31,7 @@ import { adjudicate } from "./genlayer.js";
 import { preflightVaultSwap, executeVaultSwap } from "./services.js";
 import { gatherEvidence, localScreen, EVENT_CHECK_INTERVAL_MS } from "./events.js";
 import { assertVaultFunds } from "./funding.js";
-import { commitmentIdFor, reserve, recoverReservation, release } from "./reservations.js";
+import { commitmentIdFor, reserve, recoverReservation, ReservationFailedError, release } from "./reservations.js";
 
 /**
  * How long a rung's hold should last. Every commitment carries an end, because
@@ -489,6 +489,7 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
     }
     if(!step.funding) step.funding={source:"previous_output",stepIndex:steps.slice(0,index).map(s=>s.action.tokenOut).lastIndexOf(step.action.tokenIn)};
     if(step.funding.source==="previous_output") {
+      if((step.action.amount.split(".")[1]?.length??0)>4) throw new Error("Upstream percentages support at most four decimal places.");
       const upstream=step.funding.stepIndex!;
       const total=(outputShares.get(upstream)??0n)+parseUnits(step.action.amount,4);
       if(total>1000000n) throw new Error("Downstream steps promise more than 100 percent of upstream output.");
@@ -847,7 +848,10 @@ export async function playbookTick(): Promise<PlaybookTickResult> {
     try {
       if(await recoverReservation("playbook",row.id))
         await q("UPDATE playbooks SET status='armed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
-    } catch(err) { result.errors.push(`arming ${row.id}: ${(err as Error).message}`); }
+    } catch(err) {
+      if(err instanceof ReservationFailedError)await q("UPDATE playbooks SET status='failed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
+      result.errors.push(`arming ${row.id}: ${(err as Error).message}`);
+    }
   }
   await reapStuckPlaybooks(result).catch((err) =>
     result.errors.push(`reap: ${(err as Error).message}`),

@@ -29,12 +29,20 @@ it("retains lost responses and retries identical bytes without another business 
  s.receipt.mockRejectedValue(new Error("not found"));await reconcileRelayerAttempts();
  expect(s.sendRaw.mock.calls[1][0].serializedTransaction).toBe(row.raw_tx);
 });
-it("fences overlapping processes and recovers unsigned nonce holes",async()=>{
+it("fences overlapping processes and frees unsigned reservations after preparation failure",async()=>{
  s.prepare.mockRejectedValueOnce(new Error("prepare interrupted"));
  await expect(durableSend({to,data,operationId:"first"})).rejects.toThrow("interrupted");
  await durableSend({to,data,operationId:"second"});
- expect(s.sendRaw.mock.calls.map(c=>parseTransaction(c[0].serializedTransaction).nonce)).toEqual([7,8]);
+ expect(s.sendRaw.mock.calls.map(c=>parseTransaction(c[0].serializedTransaction).nonce)).toEqual([7]);
+ expect((await s.db.query("SELECT * FROM execution_attempts WHERE id='first'")).rows).toHaveLength(0);
  const overlapping=await Promise.allSettled([durableSend({to,data,operationId:"third"}),durableSend({to,data,operationId:"fourth"})]);
  expect(overlapping.filter(r=>r.status==="fulfilled")).toHaveLength(1);
  expect((await s.db.query("SELECT nonce FROM execution_attempts GROUP BY nonce HAVING count(*)>1")).rows).toHaveLength(0);
+});
+
+it("resumes an unsigned reservation after a crash before allocating beyond it",async()=>{
+ await s.db.query("INSERT INTO relayer_senders(chain_id,sender,next_nonce) VALUES($1,$2,8)",[11155111,account.address.toLowerCase()]);
+ await s.db.query("INSERT INTO execution_attempts(id,chain_id,sender,nonce,target,calldata) VALUES('crash',11155111,$1,7,$2,$3)",[account.address.toLowerCase(),to,data]);
+ await durableSend({to,data,operationId:'following'});
+ expect(s.sendRaw.mock.calls.map(c=>parseTransaction(c[0].serializedTransaction).nonce)).toEqual([7,8]);
 });

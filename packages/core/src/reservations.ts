@@ -39,6 +39,7 @@
  * which is the useful guarantee even when the final size is decided later.
  */
 
+import {percentageOf} from "./validation.js";
 import { randomUUID } from "node:crypto";
 import { formatUnits, keccak256, parseUnits, stringToHex } from "viem";
 import { tokenBySymbol, type TokenMeta } from "@roque/shared";
@@ -173,7 +174,7 @@ export async function reserve(legs: ReservationInput[]): Promise<void> {
       const free = (await availability(leg.user, token.symbol)).available;
       const alreadyHere = claimedHere.get(token.symbol) ?? 0n;
       const spare = free > alreadyHere ? free - alreadyHere : 0n;
-      raw = (spare * BigInt(Math.round(percent * 100))) / 10_000n;
+      raw = percentageOf(spare,leg.amount);
     }
     if (raw <= 0n) {
       throw new Error(
@@ -243,12 +244,19 @@ async function persistReservations(prepared:Array<{leg:ReservationInput;token:To
   }
 }
 
+export class ReservationFailedError extends Error {}
+
 /** Resume the recorded hold with identical business data, including after a lost reply. */
 export async function recoverReservation(source:string,sourceId:string):Promise<boolean> {
   const rows=await q<{id:string;payload:{prepared:Array<{leg:ReservationInput;token:TokenMeta;raw:string;percent:number|null;id:`0x${string}`}>;intents:Array<Record<string,string>>}}>(
     "SELECT id,payload FROM reservation_batches WHERE source_kind=$1 AND source_id=$2 ORDER BY created_at DESC LIMIT 1",[source,sourceId]);
   const batch=rows[0];if(!batch)return false;
   const intents=batch.payload.intents.map(i=>({...i,amount:BigInt(i.amount),unlockAt:BigInt(i.unlockAt),nonce:BigInt(i.nonce),deadline:BigInt(i.deadline)})) as CommitIntent[];
+  const attempt=(await q<{status:string}>("SELECT status FROM execution_attempts WHERE id=$1",[batch.id]))[0];
+  if(attempt?.status==='mined_revert'){
+    await q("UPDATE reservation_batches SET status='failed' WHERE id=$1",[batch.id]);
+    throw new ReservationFailedError('The recorded hold reverted; re-arm with a new reviewed reservation.');
+  }
   await lockCommitments(intents,batch.id);
   await persistReservations(batch.payload.prepared.map(p=>({...p,raw:BigInt(p.raw)})));
   await q("UPDATE reservation_batches SET status='held' WHERE id=$1",[batch.id]);

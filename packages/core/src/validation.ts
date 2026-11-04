@@ -33,3 +33,11 @@ export const adjudicationSchema = z.object({
   rationale: z.string().max(500), requestId: z.string().max(128).optional(),
   creator: z.string().max(100).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
 }).strict().refine((v) => !v.met || v.confidence === "high", "Positive judgments require high confidence.");
+
+/** Decimal percentages resolve in integer units, without binary-float rounding. */
+export function percentageOf(raw:bigint,amount:string):bigint {
+ decimal.parse(amount);const [whole,fraction=""]=amount.split(".");
+ const scale=10n**BigInt(fraction.length),numerator=BigInt(whole+fraction);
+ if(numerator<=0n||numerator>100n*scale)throw new Error("Percentage must be above zero and at most 100.");
+ return raw*numerator/(100n*scale);
+}

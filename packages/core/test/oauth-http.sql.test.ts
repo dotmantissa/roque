@@ -1,0 +1,45 @@
+import {PGlite} from '@electric-sql/pglite';
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
+import {createHash} from 'node:crypto';
+import {privateKeyToAccount} from 'viem/accounts';
+const s=vi.hoisted(()=>({db:null as unknown as PGlite}));
+vi.mock('../src/db/index.js',async original=>({...await original<typeof import('../src/db/index.js')>(),q:async(t:string,p:unknown[]=[])=> (await s.db.query(t,p)).rows}));
+const {SCHEMA_SQL}=await import('../src/db/index.js');
+const {migration0002}=await import('../src/db/migrations/0002-public-api.js');
+const {createMcpServer}=await import('../../../apps/mcp/src/server.js');
+let app:Awaited<ReturnType<typeof createMcpServer>>;
+const wallet=privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+beforeAll(async()=>{s.db=new PGlite();await s.db.exec(SCHEMA_SQL+'\n'+migration0002);process.env.OAUTH_ALLOWED_REDIRECTS='https://claude.example/callback';app=await createMcpServer();},30000);
+afterAll(async()=>{await app.close();await s.db.close();});
+it('rejects unregistered redirects, malformed input and unconnected MCP access',async()=>{
+ const r=await app.inject({method:'POST',url:'/oauth/register',payload:{client_name:'Bad',redirect_uris:['https://evil.example']}});expect(r.statusCode).toBe(400);
+ const invalid=await app.inject({method:'POST',url:'/v1/intents',payload:{bad:true}});expect(invalid.statusCode).toBe(401);
+ const unauth=await app.inject({method:'POST',url:'/mcp',headers:{host:'localhost:3000'},payload:{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'test',version:'1'}}}});expect(unauth.statusCode).toBe(401);expect(unauth.headers['www-authenticate']).toContain('resource_metadata');
+});
+it('links a wallet, exchanges a PKCE code once, enforces audience and revokes MCP',async()=>{
+ const reg=await app.inject({method:'POST',url:'/oauth/register',payload:{client_name:'Connector',redirect_uris:['https://claude.example/callback']}});expect(reg.statusCode).toBe(201);const client=reg.json().client_id;
+ const verifier='a'.repeat(64),challenge=createHash('sha256').update(verifier).digest('base64url');
+ const query=new URLSearchParams({client_id:client,redirect_uri:'https://claude.example/callback',response_type:'code',code_challenge:challenge,code_challenge_method:'S256',state:'state-with-at-least-16-bytes',resource:'http://localhost:3000/mcp',scope:'intents:write intents:read quotes:read swaps:prepare swaps:read'});
+ const auth=await app.inject({method:'GET',url:'/oauth/authorize?'+query});expect(auth.statusCode).toBe(302);const requestId=new URL(auth.headers.location!).searchParams.get('request');
+ const c=await app.inject({method:'POST',url:'/auth/challenge',payload:{owner:wallet.address}});expect(c.statusCode).toBe(200);const login=c.json();
+ const signature=await wallet.signMessage({message:login.message});
+ const sess=await app.inject({method:'POST',url:'/auth/session',payload:{owner:wallet.address,challengeId:login.challengeId,signature}});expect(sess.statusCode).toBe(200);const walletToken=sess.json().token;
+ const consent=await app.inject({method:'POST',url:'/oauth/consent',headers:{authorization:'Bearer '+walletToken},payload:{requestId,approve:true}});expect(consent.statusCode,consent.body).toBe(200);
+ const redirect=new URL(consent.json().redirectUrl);expect(redirect.searchParams.get('state')).toBe('state-with-at-least-16-bytes');const code=redirect.searchParams.get('code');
+ const input={grant_type:'authorization_code',client_id:client,code,redirect_uri:'https://claude.example/callback',code_verifier:verifier,resource:'http://localhost:3000/mcp'};
+ const bad=await app.inject({method:'POST',url:'/oauth/token',headers:{'content-type':'application/x-www-form-urlencoded'},payload:new URLSearchParams({...input,code_verifier:'b'.repeat(64)} as Record<string,string>).toString()});expect(bad.statusCode).toBeGreaterThanOrEqual(400);
+ // Failed PKCE redemption burns the intercepted code; a new consent is required.
+ const again=await app.inject({method:'GET',url:'/oauth/authorize?'+query});
+ const freshId=new URL(again.headers.location!).searchParams.get('request');
+ const fresh=await app.inject({method:'POST',url:'/oauth/consent',headers:{authorization:'Bearer '+walletToken},payload:{requestId:freshId,approve:true}});
+ input.code=new URL(fresh.json().redirectUrl).searchParams.get('code');
+ const log=vi.spyOn(app.log,'error');const token=await app.inject({method:'POST',url:'/oauth/token',headers:{'content-type':'application/x-www-form-urlencoded'},payload:new URLSearchParams(input as Record<string,string>).toString()});expect(token.statusCode,token.body+log.mock.calls.map(c=>(c[0] as unknown as Error)?.message).join()).toBe(200);const access=token.json().access_token;expect(access).toBeTruthy();
+ expect((await app.inject({method:'POST',url:'/oauth/token',headers:{'content-type':'application/x-www-form-urlencoded'},payload:new URLSearchParams(input as Record<string,string>).toString()})).statusCode).toBeGreaterThanOrEqual(400);
+ const {apiContext}=await import('../src/public-api.js');await expect(apiContext(undefined,access,'swaps:read')).rejects.toMatchObject({code:'SESSION_EXPIRED'});
+ const headers={host:'localhost:3000',authorization:'Bearer '+access,accept:'application/json, text/event-stream'};
+ const init=await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'test',version:'1'}}}});expect(init.statusCode,init.body).toBe(200);
+ const list=await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:2,method:'tools/list'}});expect(list.statusCode,list.body).toBe(200);expect(list.json().result.tools).toHaveLength(5);
+ const tools=await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'roque_list_tokens',arguments:{}}}});expect(tools.statusCode,tools.body).toBe(200);expect(tools.json().result.content[0].text).toContain('rUSDC');
+ await app.inject({method:'POST',url:'/oauth/revoke',payload:{token:access}});
+ expect((await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:4,method:'tools/list'}})).statusCode).toBe(401);
+});

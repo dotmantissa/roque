@@ -36,8 +36,9 @@ CREATE TABLE IF NOT EXISTS swap_plans(
 );
 CREATE TABLE IF NOT EXISTS approval_links(
  token_hash text PRIMARY KEY, swap_id uuid NOT NULL REFERENCES swap_plans(id), client_id text NOT NULL,
- owner_address text NOT NULL, expires_at timestamptz NOT NULL, consumed_at timestamptz
+ owner_address text NOT NULL, connection_token_hash text, expires_at timestamptz NOT NULL, consumed_at timestamptz
 );
+ALTER TABLE approval_links ADD COLUMN IF NOT EXISTS connection_token_hash text;
 CREATE TABLE IF NOT EXISTS reservation_batches(
  id text PRIMARY KEY, source_kind text NOT NULL, source_id text NOT NULL,
  payload jsonb NOT NULL, status text NOT NULL DEFAULT 'pending', created_at timestamptz NOT NULL DEFAULT now()
@@ -67,5 +68,6 @@ ALTER TABLE playbooks DROP CONSTRAINT IF EXISTS playbooks_status_check;
 ALTER TABLE playbooks ADD CONSTRAINT playbooks_status_check CHECK(status IN ('draft','arming','armed','completed','cancelled','failed'));
 CREATE TABLE IF NOT EXISTS oauth_requests(id uuid PRIMARY KEY,query jsonb NOT NULL,expires_at timestamptz NOT NULL,consumed_at timestamptz);
 CREATE TABLE IF NOT EXISTS oauth_codes(code_hash text PRIMARY KEY,payload jsonb NOT NULL,expires_at timestamptz NOT NULL,consumed_at timestamptz);
+CREATE TABLE IF NOT EXISTS keeper_progress(key text PRIMARY KEY,next_order_id bigint NOT NULL DEFAULT 1);
 INSERT INTO schema_migrations(version) VALUES('0002-public-api') ON CONFLICT DO NOTHING;
 `;
