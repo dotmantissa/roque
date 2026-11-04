@@ -35,7 +35,7 @@ const client=createPublicClient({chain:sepolia,transport:http(rpc),cacheTime:0})
 const wallet=createWalletClient({account:deployer,chain:sepolia,transport:http(rpc)});
 const registryPath=join(root,'contracts/deployments/sepolia.json'),sharedPath=join(root,'packages/shared/src/deployment.json');
 const registry=JSON.parse(await readFile(registryPath,'utf8'));
-type Journal={operations:Record<string,{hash:Hex;raw:Hex;receipt?:{address?:Hex;blockNumber:string}}>;executor?:Hex;genlayerHash?:Hex;interpreter?:Hex;failedGenlayerDeployments?:Hex[];lastError?:string};
+type Journal={operations:Record<string,{hash:Hex;raw:Hex;receipt?:{address?:Hex;blockNumber:string}}>;executor?:Hex;genlayerHash?:Hex;interpreter?:Hex;failedGenlayerDeployments?:Hex[];supersededGenlayerDeployments?:Array<{hash:Hex;interpreter?:Hex}>;lastError?:string};
 let journal:Journal={operations:{}};try{journal=JSON.parse(await readFile(statePath,'utf8'));}catch{}
 const save=()=>atomic(statePath,JSON.stringify(journal,null,2)+'\n');
 const artifact=JSON.parse(await readFile(join(root,'contracts/out/AgentExecutor.sol/AgentExecutor.json'),'utf8'));
@@ -84,6 +84,10 @@ async function main(){
     journal.failedGenlayerDeployments=[...(journal.failedGenlayerDeployments??[]),journal.genlayerHash!];delete journal.genlayerHash;await save();return main();
    }
    throw err;
+  }
+  if(typeof full.data?.contract_code==='string' && Buffer.from(full.data.contract_code,'base64').toString('utf8')!==source){
+   journal.supersededGenlayerDeployments=[...(journal.supersededGenlayerDeployments??[]),{hash:journal.genlayerHash!,interpreter:journal.interpreter}];
+   delete journal.genlayerHash;delete journal.interpreter;await save();return main();
   }
   const data=full.data??{};
   const address=(data.contract_address??data.contractAddress??data.new_contract_address??full.to_address??full.recipient) as Hex;

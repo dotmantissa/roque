@@ -532,7 +532,7 @@ Answer with ONLY this JSON, no prose:
     def _bind(self, operation: str, request_id: str, text: str, context: str) -> dict:
         if not request_id or len(request_id) > 128 or len(text) > 2000 or len(context) > 20000:
             raise gl.vm.UserError("INPUT: oversized or empty request")
-        creator = str(gl.message.sender_account).lower()
+        creator = str(gl.message.sender_address).lower()
         digest = hashlib.sha256(json.dumps([operation, text, context], separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         identity = {"requestId": request_id, "creator": creator, "inputHash": digest}
         key = operation + ":" + request_id
