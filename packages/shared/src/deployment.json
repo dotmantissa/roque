@@ -1,5 +1,5 @@
 {
-  "agentExecutor": "0xcd0098dD2Cf098D4C82Fdd8fEdc4E1309e2009dC",
+  "agentExecutor": "0x097ab154e71da5c68ba9ec1939e7394b4ffc24c7",
   "agentSigner": "0x1254F7FBc7Cb0289c06a649A032783e7d0C68934",
   "chainId": 11155111,
   "deployer": "0xBC1399c55538eC034d4Da550C03c34Ae0C357f53",
@@ -231,5 +231,17 @@
     "rFORTH",
     "rEURC",
     "rPAXG"
-  ]
+  ],
+  "legacyExecutors": [
+    {
+      "address": "0xcd0098dD2Cf098D4C82Fdd8fEdc4E1309e2009dC",
+      "domainVersion": "1",
+      "deploymentBlock": null
+    }
+  ],
+  "previousAgentExecutor": "0xcd0098dD2Cf098D4C82Fdd8fEdc4E1309e2009dC",
+  "executorDomainVersion": "2",
+  "executorDeploymentBlock": "12061723",
+  "executorDeploymentTransaction": "0xc0a83d7ace714828361e9fb7b8918f77414e2467aa2d0c47b6d280c5e7b5c25e",
+  "executorRuntimeCodeHash": "0xf5fd573f734cc398949fc409e42b9bedcfa79808021e828f6cd88f1fe71c3805"
 }
