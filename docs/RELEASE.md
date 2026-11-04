@@ -6,6 +6,8 @@ The promoted application source is `ddea807`, including the verified SDK session
 
 Verified locally: 258 core tests, 100 Solidity tests, 54 Python tests with GenVM lint, workspace typechecks, production Next build, Foundry formatting/lint and independent partner browser bundle. The SQL/EVM wallet test verifies actual wallet output against the decoded settlement receipt on Anvil. Live release evidence is appended below as it is obtained.
 
+The subsequent dependency candidate patches runtime and development advisories, with zero findings in both pnpm audits. It passes 259 core tests, three WalletConnect/UUID/Sharp compatibility checks, all workspace typechecks and the production Next build. The ordinary local build hit Google font HTTPS timeouts; the successful local retry used genuine font bytes cached outside the repository. The hosted redeployment uses the normal build. This candidate also fixes exact-timestamp lease reacquisition with a deterministic owner/generation fencing regression. The currently promoted deployment remains the earlier source until staged hosted verification and promotion complete.
+
 Target: Vercel team `mantissas-projects`, project `roque`, root `apps/web`, Node24, domain `https://roque-dex.vercel.app`. Sepolia execution and GenLayer studionet interpretation. Native Rialo execution is outside scope; Rialo integration here means Latch.
 
 ## Authorized release procedure

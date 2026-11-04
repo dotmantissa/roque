@@ -13,7 +13,7 @@
     "build:web": "pnpm --filter @roque/web build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @roque/core test",
-    "check": "pnpm typecheck && pnpm test && pnpm build:web"
+    "check": "pnpm typecheck && pnpm test && pnpm --filter @roque/web test:wallet-dependencies && pnpm build:web"
   },
   "packageManager": "pnpm@11.2.2"
 }

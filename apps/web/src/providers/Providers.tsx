@@ -39,7 +39,10 @@ function WalletLayer({ children }: { children: React.ReactNode }) {
       appId={APP_ID}
       config={{
         loginMethods: ["wallet"],
-        embeddedWallets: { createOnLogin: "off" },
+        embeddedWallets: {
+          ethereum: { createOnLogin: "off" },
+          solana: { createOnLogin: "off" },
+        },
         defaultChain: sepolia,
         supportedChains: [sepolia],
         appearance: {
