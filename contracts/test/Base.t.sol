@@ -34,16 +34,17 @@ contract Base is Test {
     address internal agentSigner = vm.addr(0xA6E77);
 
     bytes32 internal constant SWAP_INTENT_TYPEHASH = keccak256(
-        "SwapIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "SwapIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
     bytes32 internal constant LIMIT_INTENT_TYPEHASH = keccak256(
-        "LimitIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,uint256 triggerPrice,bool triggerAbove,uint64 expiry,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "LimitIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,uint256 triggerPrice,bool triggerAbove,uint64 expiry,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
     bytes32 internal constant COMMIT_INTENT_TYPEHASH = keccak256(
-        "CommitIntent(address user,address token,uint256 amount,uint64 unlockAt,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "CommitIntent(address user,address token,uint256 amount,uint64 unlockAt,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
-    bytes32 internal constant RELEASE_INTENT_TYPEHASH =
-        keccak256("ReleaseIntent(address user,bytes32 commitmentId,uint32 epoch,uint256 deadline)");
+    bytes32 internal constant RELEASE_INTENT_TYPEHASH = keccak256(
+        "ReleaseIntent(address user,bytes32 commitmentId,uint32 epoch,uint256 deadline,uint256 capabilityGeneration)"
+    );
     bytes32 internal constant GRANT_TYPEHASH = keccak256(
         "Grant(address user,address agentSigner,uint256 maxPerTradeUsd,uint256 maxDailyUsd,uint256 maxSlippageBps,uint64 validUntil,uint256 grantNonce)"
     );
@@ -110,7 +111,8 @@ contract Base is Test {
                 i.minAmountOut,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                executor.capabilityGeneration(i.user)
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, _digest(structHash));
@@ -135,7 +137,8 @@ contract Base is Test {
                 i.expiry,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                executor.capabilityGeneration(i.user)
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, _digest(structHash));
@@ -156,7 +159,8 @@ contract Base is Test {
                 i.unlockAt,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                executor.capabilityGeneration(i.user)
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, _digest(structHash));
@@ -169,7 +173,14 @@ contract Base is Test {
         returns (bytes memory)
     {
         bytes32 structHash = keccak256(
-            abi.encode(RELEASE_INTENT_TYPEHASH, i.user, i.commitmentId, i.epoch, i.deadline)
+            abi.encode(
+                RELEASE_INTENT_TYPEHASH,
+                i.user,
+                i.commitmentId,
+                i.epoch,
+                i.deadline,
+                executor.capabilityGeneration(i.user)
+            )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, _digest(structHash));
         return abi.encodePacked(r, s, v);

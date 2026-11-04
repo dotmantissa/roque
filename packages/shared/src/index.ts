@@ -146,7 +146,7 @@ export const poolAddressFor = (symbolA: string, symbolB: string): Hex => {
 // frontend and the agent side must match this exactly or recovery fails.
 export const eip712Domain = {
   name: "RoqueAgentExecutor",
-  version: "1",
+  version: "2",
   chainId: deployedChainId,
   verifyingContract: addresses.agentExecutor,
 } as const;
@@ -169,6 +169,7 @@ export const eip712Types = {
     { name: "commitmentId", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+    { name: "capabilityGeneration", type: "uint256" },
   ],
   LimitIntent: [
     { name: "user", type: "address" },
@@ -182,6 +183,7 @@ export const eip712Types = {
     { name: "commitmentId", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+    { name: "capabilityGeneration", type: "uint256" },
   ],
   // Setting vault money aside for one named future trade. Moves nothing; all it
   // does is narrow what the rest of the vault is allowed to do.
@@ -193,6 +195,7 @@ export const eip712Types = {
     { name: "commitmentId", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+    { name: "capabilityGeneration", type: "uint256" },
   ],
   // Handing it back. The epoch pins the signature to one particular lock of
   // that id, so a release written for an order that was cancelled cannot be
@@ -202,6 +205,7 @@ export const eip712Types = {
     { name: "commitmentId", type: "bytes32" },
     { name: "epoch", type: "uint32" },
     { name: "deadline", type: "uint256" },
+    { name: "capabilityGeneration", type: "uint256" },
   ],
   Grant: [
     { name: "user", type: "address" },

@@ -131,20 +131,23 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
     }
 
     bytes32 private constant SWAP_INTENT_TYPEHASH = keccak256(
-        "SwapIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "SwapIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
     bytes32 private constant LIMIT_INTENT_TYPEHASH = keccak256(
-        "LimitIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,uint256 triggerPrice,bool triggerAbove,uint64 expiry,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "LimitIntent(address user,address tokenIn,address tokenOut,uint256 amountIn,uint256 minAmountOut,uint256 triggerPrice,bool triggerAbove,uint64 expiry,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
     bytes32 private constant COMMIT_INTENT_TYPEHASH = keccak256(
-        "CommitIntent(address user,address token,uint256 amount,uint64 unlockAt,bytes32 commitmentId,uint256 nonce,uint256 deadline)"
+        "CommitIntent(address user,address token,uint256 amount,uint64 unlockAt,bytes32 commitmentId,uint256 nonce,uint256 deadline,uint256 capabilityGeneration)"
     );
-    bytes32 private constant RELEASE_INTENT_TYPEHASH =
-        keccak256("ReleaseIntent(address user,bytes32 commitmentId,uint32 epoch,uint256 deadline)");
+    bytes32 private constant RELEASE_INTENT_TYPEHASH = keccak256(
+        "ReleaseIntent(address user,bytes32 commitmentId,uint32 epoch,uint256 deadline,uint256 capabilityGeneration)"
+    );
     bytes32 private constant GRANT_TYPEHASH = keccak256(
         "Grant(address user,address agentSigner,uint256 maxPerTradeUsd,uint256 maxDailyUsd,uint256 maxSlippageBps,uint64 validUntil,uint256 grantNonce)"
     );
 
+    mapping(address => uint256) public capabilityGeneration;
+    mapping(address => uint256) public maxFeedAge;
     mapping(address => TokenInfo) public tokenInfo;
     mapping(address => mapping(address => uint256)) public vaultBalance; // user => token => amount
     /// @notice The part of a vault balance already set aside for commitments.
@@ -217,10 +220,12 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
     error LengthMismatch();
     error ZeroAmount();
     error BadFeed();
+    error InvalidCapability();
+    error UnsupportedTransfer();
 
     constructor(address router_, address orderBook_)
         Ownable(msg.sender)
-        EIP712("RoqueAgentExecutor", "1")
+        EIP712("RoqueAgentExecutor", "2")
     {
         router = DEXRouter(router_);
         orderBook = OrderBook(orderBook_);
@@ -234,10 +239,20 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         external
         onlyOwner
     {
+        if (token.code.length == 0 || decimals_ > 18) revert BadFeed();
+        if (!isStable && (feed.code.length == 0 || IPriceFeed(feed).decimals() > 18)) {
+            revert BadFeed();
+        }
+        maxFeedAge[token] = 1 hours;
         tokenInfo[token] = TokenInfo({
             registered: true, decimals: decimals_, isStable: isStable, feed: IPriceFeed(feed)
         });
         emit TokenRegistered(token, decimals_, isStable, feed);
+    }
+
+    function setMaxFeedAge(address token, uint256 age) external onlyOwner {
+        if (!tokenInfo[token].registered || age == 0 || age > 1 days) revert BadFeed();
+        maxFeedAge[token] = age;
     }
 
     /// @notice Value an amount of a registered token in dollars, 1e18 fixed
@@ -248,9 +263,14 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         if (info.isStable) {
             return (amount * USD) / (10 ** info.decimals);
         }
-        (, int256 answer,,,) = info.feed.latestRoundData();
-        if (answer <= 0) revert BadFeed();
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) =
+            info.feed.latestRoundData();
+        if (
+            answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp
+                || block.timestamp - updatedAt > maxFeedAge[token] || answeredInRound < roundId
+        ) revert BadFeed();
         uint8 feedDecimals = info.feed.decimals();
+        if (feedDecimals > 18) revert BadFeed();
         return (amount * answer.toUint256() * USD) / ((10 ** info.decimals) * (10 ** feedDecimals));
     }
 
@@ -271,7 +291,11 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
     /// ever reachable by an agent, and never beyond the caps you set.
     function deposit(address token, uint256 amount) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
+        uint256 beforeBalance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        if (IERC20(token).balanceOf(address(this)) - beforeBalance != amount) {
+            revert UnsupportedTransfer();
+        }
         vaultBalance[msg.sender][token] += amount;
         emit Deposited(msg.sender, token, amount);
     }
@@ -333,7 +357,6 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         );
         address signer = ECDSA.recover(_hashTypedDataV4(structHash), signature);
         if (signer != user) revert WrongSigner(signer, user);
-        grantNonce[user]++;
         _setCapability(user, agentSigner, maxPerTradeUsd, maxDailyUsd, maxSlippageBps, validUntil);
     }
 
@@ -345,6 +368,12 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         uint256 maxSlippageBps,
         uint64 validUntil
     ) internal {
+        if (
+            agentSigner == address(0) || maxPerTradeUsd == 0 || maxDailyUsd < maxPerTradeUsd
+                || maxSlippageBps > 5000 || validUntil <= block.timestamp
+        ) revert InvalidCapability();
+        grantNonce[user]++;
+        capabilityGeneration[user]++;
         capabilities[user] = Capability({
             agentSigner: agentSigner,
             maxPerTradeUsd: maxPerTradeUsd,
@@ -367,6 +396,8 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         Capability storage c = capabilities[msg.sender];
         if (!c.exists) revert CapabilityMissing();
         c.revoked = true;
+        grantNonce[msg.sender]++;
+        capabilityGeneration[msg.sender]++;
         emit CapabilityRevoked(msg.sender);
     }
 
@@ -585,6 +616,10 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
             signature
         );
 
+        _checkSlippage(
+            intent.tokenIn, intent.tokenOut, intent.amountIn, intent.minAmountOut, intent.user
+        );
+
         _spendVault(intent.user, intent.tokenIn, intent.amountIn, intent.commitmentId);
         IERC20(intent.tokenIn).forceApprove(address(orderBook), intent.amountIn);
         orderId = orderBook.createOrderFor(
@@ -663,7 +698,7 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
     ) internal view {
         uint256 quote = router.quoteSwap(tokenIn, tokenOut, amountIn);
         uint256 floor = (quote * (BPS - capabilities[user].maxSlippageBps)) / BPS;
-        if (minAmountOut < floor) revert SlippageTooHigh(minAmountOut, floor);
+        if (minAmountOut == 0 || minAmountOut < floor) revert SlippageTooHigh(minAmountOut, floor);
     }
 
     /// @dev Take `amount` out of the vault for a trade.
@@ -701,7 +736,7 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
         vaultBalance[user][token] = bal - amount;
     }
 
-    function _hashSwap(SwapIntent calldata i) internal pure returns (bytes32) {
+    function _hashSwap(SwapIntent calldata i) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
                 SWAP_INTENT_TYPEHASH,
@@ -712,12 +747,13 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
                 i.minAmountOut,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                capabilityGeneration[i.user]
             )
         );
     }
 
-    function _hashLimit(LimitIntent calldata i) internal pure returns (bytes32) {
+    function _hashLimit(LimitIntent calldata i) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
                 LIMIT_INTENT_TYPEHASH,
@@ -731,12 +767,13 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
                 i.expiry,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                capabilityGeneration[i.user]
             )
         );
     }
 
-    function _hashCommit(CommitIntent calldata i) internal pure returns (bytes32) {
+    function _hashCommit(CommitIntent calldata i) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
                 COMMIT_INTENT_TYPEHASH,
@@ -746,16 +783,23 @@ contract AgentExecutor is Ownable, ReentrancyGuard, EIP712 {
                 i.unlockAt,
                 i.commitmentId,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                capabilityGeneration[i.user]
             )
         );
     }
 
-    function _hashRelease(ReleaseIntent calldata i) internal pure returns (bytes32) {
-        return
-            keccak256(
-                abi.encode(RELEASE_INTENT_TYPEHASH, i.user, i.commitmentId, i.epoch, i.deadline)
-            );
+    function _hashRelease(ReleaseIntent calldata i) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                RELEASE_INTENT_TYPEHASH,
+                i.user,
+                i.commitmentId,
+                i.epoch,
+                i.deadline,
+                capabilityGeneration[i.user]
+            )
+        );
     }
 
     // ─────────────────────────────────────────────────────────────

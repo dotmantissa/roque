@@ -125,7 +125,7 @@ export async function signSwapIntent(intent: SwapIntent): Promise<Hex> {
     domain: eip712Domain,
     types: { SwapIntent: eip712Types.SwapIntent },
     primaryType: "SwapIntent",
-    message: intent,
+    message: { ...intent, capabilityGeneration: await capabilityGeneration(intent.user) },
   });
 }
 
@@ -135,7 +135,7 @@ export async function signLimitIntent(intent: LimitIntent): Promise<Hex> {
     domain: eip712Domain,
     types: { LimitIntent: eip712Types.LimitIntent },
     primaryType: "LimitIntent",
-    message: intent,
+    message: { ...intent, capabilityGeneration: await capabilityGeneration(intent.user) },
   });
 }
 
@@ -145,7 +145,7 @@ export async function signCommitIntent(intent: CommitIntent): Promise<Hex> {
     domain: eip712Domain,
     types: { CommitIntent: eip712Types.CommitIntent },
     primaryType: "CommitIntent",
-    message: intent,
+    message: { ...intent, capabilityGeneration: await capabilityGeneration(intent.user) },
   });
 }
 
@@ -155,7 +155,7 @@ export async function signReleaseIntent(intent: ReleaseIntent): Promise<Hex> {
     domain: eip712Domain,
     types: { ReleaseIntent: eip712Types.ReleaseIntent },
     primaryType: "ReleaseIntent",
-    message: intent,
+    message: { ...intent, capabilityGeneration: await capabilityGeneration(intent.user) },
   });
 }
 
@@ -446,4 +446,11 @@ export async function submitGrant(params: {
     ],
   });
   return sendFromRelayer(data);
+}
+
+/** Only executor v2 supports generation-bound authority; old deployments fail closed. */
+export async function capabilityGeneration(user: `0x${string}`): Promise<bigint> {
+  return publicClient().readContract({ address: addresses.agentExecutor,
+    abi: [{type: "function",name: "capabilityGeneration",stateMutability: "view",inputs:[{name:"user",type:"address"}],outputs:[{name:"",type:"uint256"}]}],
+    functionName: "capabilityGeneration", args: [user] }) as Promise<bigint>;
 }

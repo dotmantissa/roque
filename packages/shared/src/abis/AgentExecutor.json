@@ -116,6 +116,25 @@
   },
   {
     "type": "function",
+    "name": "capabilityGeneration",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "commitments",
     "inputs": [
       {
@@ -741,6 +760,25 @@
   },
   {
     "type": "function",
+    "name": "maxFeedAge",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "orderBook",
     "inputs": [],
     "outputs": [
@@ -944,6 +982,24 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setMaxFeedAge",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "age",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1563,6 +1619,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidCapability",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidShortString",
     "inputs": []
   },
@@ -1705,6 +1766,11 @@
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedTransfer",
+    "inputs": []
   },
   {
     "type": "error",

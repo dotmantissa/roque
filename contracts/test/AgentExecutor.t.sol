@@ -242,7 +242,7 @@ contract AgentExecutorTest is Base {
             tokenIn: address(usdc),
             tokenOut: address(weth),
             amountIn: 500e6,
-            minAmountOut: 0,
+            minAmountOut: router.quoteSwap(address(usdc), address(weth), 500e6) * 9900 / 10000,
             triggerPrice: 2_400e8,
             triggerAbove: false,
             expiry: uint64(block.timestamp + 2 days),
