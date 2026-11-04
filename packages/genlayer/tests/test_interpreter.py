@@ -22,7 +22,7 @@ import pytest
 PKG_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PKG_ROOT))
 
-from genlayer import set_prompt_response  # noqa: E402
+from genlayer import gl, set_prompt_response  # noqa: E402
 from contracts.roque_interpreter import RoqueInterpreter  # noqa: E402
 
 
@@ -523,3 +523,32 @@ def test_result_cannot_be_overwritten(contract):
     with pytest.raises(Exception):
         contract.adjudicate("immutable", "different", "{}")
     assert contract.get_adjudication("immutable") == original
+
+
+@pytest.mark.parametrize("operation", ["interpret", "adjudicate"])
+def test_result_is_bound_to_creator(contract, monkeypatch, operation):
+    _model_says({"met": True, "confidence": "high", "rationale": "original"})
+    method = getattr(contract, operation)
+    getter = getattr(contract, "get_interpretation" if operation == "interpret" else "get_adjudication")
+    method("creator-bound", "original", "{}")
+    original = getter("creator-bound")
+    assert json.loads(original)["creator"] == str(gl.message.sender_address).lower()
+    monkeypatch.setattr(gl.message, "sender_address", "0x0000000000000000000000000000000000000002")
+    with pytest.raises(Exception, match="AUTH: conflicting request identity"):
+        method("creator-bound", "original", "{}")
+    assert getter("creator-bound") == original
+
+
+@pytest.mark.parametrize("operation", ["interpret", "adjudicate"])
+def test_identical_retry_is_immutable_and_context_change_rejected(contract, operation):
+    _model_says({"met": True, "confidence": "high", "rationale": "original"})
+    method = getattr(contract, operation)
+    getter = getattr(contract, "get_interpretation" if operation == "interpret" else "get_adjudication")
+    method("retry-bound", "original", "{}")
+    original = getter("retry-bound")
+    _model_says({"met": False, "confidence": "low", "rationale": "changed"})
+    method("retry-bound", "original", "{}")
+    assert getter("retry-bound") == original
+    with pytest.raises(Exception, match="AUTH: conflicting request identity"):
+        method("retry-bound", "original", '{"different":"context"}')
+    assert getter("retry-bound") == original

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import collections.abc as _abc
 from typing import Any, Callable
+from types import SimpleNamespace
 
 
 # Some SDK-adjacent imports expect collections.abc.Buffer, added in 3.12. Alias
@@ -141,8 +142,7 @@ class Address(str):
 # Re-export the names a contract pulls in via `from genlayer import *`.
 __all__ = ["gl", "TreeMap", "DynArray", "u256", "Address", "set_prompt_response"]
 
-# Current runner module-style API, retaining deterministic local behavior.
-from types import SimpleNamespace
+# Module-style API compatibility for tests, retaining deterministic behavior.
 contract = SimpleNamespace(Contract=gl.Contract)
 message = gl.message
 vm = gl.vm

@@ -12,8 +12,8 @@ from pathlib import Path
 package = Path(__file__).resolve().parent.parent
 sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != package]
 
-from genvm_linter.validate import validator
-from genvm_linter.cli import cli
+from genvm_linter.validate import validator  # noqa: E402
+from genvm_linter.cli import cli  # noqa: E402
 
 original = validator.load_sdk
 
