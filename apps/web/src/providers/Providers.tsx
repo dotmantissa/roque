@@ -19,10 +19,8 @@ const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 
 function WalletLayer({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
-  // Force Privy to remount when the theme actually changes, since its SDK
-  // only reads `appearance.theme` once at mount and does not react to prop
-  // updates on its own.
-  const privyKey = theme;
+  // Appearance changes must preserve the provider and its wallet/session state.
+  // The current SDK derives its palette from config as it updates.
 
   if (!APP_ID) {
     // Without an app id the wallet features cannot work, but the market panels
@@ -35,7 +33,6 @@ function WalletLayer({ children }: { children: React.ReactNode }) {
 
   return (
     <PrivyProvider
-      key={privyKey}
       appId={APP_ID}
       config={{
         loginMethods: ["wallet"],
