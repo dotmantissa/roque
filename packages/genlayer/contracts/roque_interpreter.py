@@ -1,7 +1,7 @@
-# { "Depends": "py-genlayer:1zr6nqk597d97kg0dyxg0shhrykx5v02zjgnyrajapy4wlqvfvwh" }
-# v0.3.0
+# v0.2.0
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
-import genlayer as gl
+from genlayer import *
 
 import json
 import hashlib
@@ -122,7 +122,7 @@ _TOKEN_BLURB = {
 _AMOUNT_RE = re.compile(r"^\d+(\.\d+)?$")
 
 
-class RoqueInterpreter(gl.contract.Contract):
+class RoqueInterpreter(gl.Contract):
     """
     Turns a sentence of plain English into a structured trade Roque can act on.
 
@@ -143,11 +143,11 @@ class RoqueInterpreter(gl.contract.Contract):
     """
 
     # request id -> interpretation JSON, so the relayer can read the result back.
-    interpretations: gl.TreeMap[str, str]
+    interpretations: TreeMap[str, str]
     # request id -> adjudication JSON, for the subjective "did this happen yet"
     # questions a price feed can never answer.
-    adjudications: gl.TreeMap[str, str]
-    request_bindings: gl.TreeMap[str, str]
+    adjudications: TreeMap[str, str]
+    request_bindings: TreeMap[str, str]
 
     def __init__(self) -> None:
         pass
@@ -532,7 +532,7 @@ Answer with ONLY this JSON, no prose:
     def _bind(self, operation: str, request_id: str, text: str, context: str) -> dict:
         if not request_id or len(request_id) > 128 or len(text) > 2000 or len(context) > 20000:
             raise gl.vm.UserError("INPUT: oversized or empty request")
-        creator = str(gl.message.sender_address).lower()
+        creator = str(gl.message.sender_account).lower()
         digest = hashlib.sha256(json.dumps([operation, text, context], separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         identity = {"requestId": request_id, "creator": creator, "inputHash": digest}
         key = operation + ":" + request_id

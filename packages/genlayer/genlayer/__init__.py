@@ -108,7 +108,7 @@ class _GL:
             return instance
 
     class message:
-        sender_address = "0x0000000000000000000000000000000000000001"
+        sender_account = "0x0000000000000000000000000000000000000001"
 
     class vm:
         class UserError(Exception):
