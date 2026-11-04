@@ -1,5 +1,9 @@
 {
   "network": "Genlayer Studio Network",
-  "address": "0x0A30a949542A7EDE8a546D6Ad2C55738e8146573",
-  "deployer": "0xC170512725764e015d3176f2eA6BD8B107b14b71"
+  "address": "0x57a3047ee7Ea3398BB79d214A1a7f068067AA119",
+  "deployer": "0x77C0254B564150c1D3C1ED4135DC569ED9EfE014",
+  "transactionHash": "0x82afeef9041c8f9478c9e1141de8a31bc53685ce009f5807f30b39bc8ec024af",
+  "sourceSha256": "5d24788103364c71755280845bb966e92edee34cb30b5fc78cf997553550e076",
+  "finality": "FINALIZED",
+  "sourceVerified": true
 }
