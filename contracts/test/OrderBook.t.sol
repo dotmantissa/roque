@@ -123,4 +123,22 @@ contract OrderBookTest is Base {
             alice, address(usdc), address(weth), 1e6, 0, 2_400e8, false, expiry
         );
     }
+
+    function test_FreshnessCannotBeDisabled() public {
+        vm.expectRevert(OrderBook.BadPrice.selector);
+        orderBook.setMaxPriceStaleness(0);
+    }
+
+    function test_RejectsZeroAndFutureTimestampsButAllowsOwnerExit() public {
+        uint256 id = _openBuyDipOrder();
+        feed.setAnswerAndTime(2_390e8, 0);
+        vm.expectRevert(OrderBook.BadPrice.selector);
+        orderBook.currentPrice();
+        feed.setAnswerAndTime(2_390e8, block.timestamp + 1);
+        vm.expectRevert(OrderBook.BadPrice.selector);
+        orderBook.currentPrice();
+        vm.prank(alice);
+        orderBook.cancelOrder(id);
+        assertEq(usdc.balanceOf(alice), 2_500e6);
+    }
 }

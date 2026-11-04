@@ -82,6 +82,10 @@ contract OrderBook is Ownable, ReentrancyGuard {
     error NotAgentExecutor();
 
     constructor(address router_, address priceFeed_) Ownable(msg.sender) {
+        if (
+            router_.code.length == 0 || priceFeed_.code.length == 0
+                || IPriceFeed(priceFeed_).decimals() != 8
+        ) revert BadPrice();
         router = DEXRouter(router_);
         priceFeed = IPriceFeed(priceFeed_);
     }
@@ -96,11 +100,13 @@ contract OrderBook is Ownable, ReentrancyGuard {
     }
 
     function setPriceFeed(address feed) external onlyOwner {
+        if (feed.code.length == 0 || IPriceFeed(feed).decimals() != 8) revert BadPrice();
         priceFeed = IPriceFeed(feed);
         emit PriceFeedSet(feed);
     }
 
     function setMaxPriceStaleness(uint256 secondsAllowed) external onlyOwner {
+        if (secondsAllowed == 0 || secondsAllowed > 24 hours) revert BadPrice();
         maxPriceStaleness = secondsAllowed;
     }
 
@@ -198,9 +204,15 @@ contract OrderBook is Ownable, ReentrancyGuard {
     /// @notice Read the current ETH/USD price from Chainlink, reverting if the
     /// feed is stale or nonsensical.
     function currentPrice() public view returns (int256 price, uint256 updatedAt) {
-        (, price,, updatedAt,) = priceFeed.latestRoundData();
-        if (price <= 0) revert BadPrice();
-        if (maxPriceStaleness != 0 && block.timestamp - updatedAt > maxPriceStaleness) {
+        (uint80 roundId, int256 answer,, uint256 timestamp, uint80 answeredInRound) =
+            priceFeed.latestRoundData();
+        price = answer;
+        updatedAt = timestamp;
+        if (
+            price <= 0 || roundId == 0 || answeredInRound < roundId || updatedAt == 0
+                || updatedAt > block.timestamp
+        ) revert BadPrice();
+        if (block.timestamp - updatedAt > maxPriceStaleness) {
             revert StalePrice();
         }
     }
