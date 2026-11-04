@@ -54,6 +54,7 @@ export interface PriceResult {
   ageSeconds: number;
   // Every tradable token's live USD price, keyed by on-chain symbol.
   prices: Record<string, number>;
+  unavailableTokens?: string[];
 }
 
 export interface CapabilityResult {

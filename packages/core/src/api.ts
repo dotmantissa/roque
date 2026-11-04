@@ -216,6 +216,7 @@ export async function handlePrice() {
     // Every token's live USD price, keyed by symbol, so the UI can value any
     // balance or pair without a round trip per token.
     prices,
+    unavailableTokens: tokenList.filter((token) => prices[token.symbol] === undefined).map((token) => token.symbol),
   };
 }
 

@@ -43,6 +43,7 @@ export function WalletPanel({
   const totalUsd = balances
     ? tokenList.reduce((sum, t) => sum + (balances[t.symbol] ?? 0) * (prices[t.symbol] ?? 0), 0)
     : 0;
+  const unpriced = tokenList.filter((token) => (balances?.[token.symbol] ?? 0) > 0 && prices[token.symbol] === undefined);
 
   if (!wallet.connected) {
     return (
@@ -127,10 +128,11 @@ export function WalletPanel({
 
       {balances ? (
         <div className="wallet-total">
-          <span className="wallet-total-label">Total value</span>
+          <span className="wallet-total-label">{unpriced.length ? "Priced value" : "Total value"}</span>
           <span className="wallet-total-value tabular">{formatUsd(totalUsd)}</span>
         </div>
       ) : null}
+      {unpriced.length ? <p className="panel-empty">Prices unavailable for {unpriced.map((token) => token.symbol).join(", ")}. These balances are excluded from the value shown.</p> : null}
       {balances ? (
         <PortfolioPieChart
           slices={tokenList.map((t) => ({
