@@ -107,6 +107,13 @@ class _GL:
                         setattr(instance, name, DynArray())
             return instance
 
+    class message:
+        sender_account = "0x0000000000000000000000000000000000000001"
+
+    class vm:
+        class UserError(Exception):
+            pass
+
     public = _Public()
     nondet = _Nondet()
     eq_principle = _EqPrinciple()

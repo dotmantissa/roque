@@ -33,6 +33,8 @@ def contract() -> RoqueInterpreter:
 
 def _model_says(obj: dict) -> None:
     """Tell the stub model to answer with this object on the next call."""
+    if obj.get("kind") in ("swap", "limit"):
+        obj = {"amountIsPercent": False, "triggerAbove": False, "confidence": "high", **obj}
     set_prompt_response(json.dumps(obj))
 
 
@@ -426,7 +428,7 @@ def test_extracts_json_wrapped_in_fences(contract: RoqueInterpreter) -> None:
     # A model that wraps its answer in a code fence should still be understood.
     set_prompt_response(
         '```json\n{"kind":"swap","tokenIn":"rUSDC","tokenOut":"rWETH",'
-        '"amount":"100","reason":"fenced"}\n```'
+        '"amount":"100","amountIsPercent":false,"triggerAbove":false,"confidence":"high","reason":"fenced"}\n```'
     )
     out = _interpret(contract, "swap 100 USDC for ETH")
     assert out["ok"] is True
@@ -495,3 +497,29 @@ def test_adjudicate_defaults_to_not_met_on_garbage(contract: RoqueInterpreter) -
 def test_unknown_request_returns_empty(contract: RoqueInterpreter) -> None:
     assert contract.get_interpretation("never-set") == "{}"
     assert contract.get_adjudication("never-set") == "{}"
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, [], {}])
+def test_malformed_verdict_never_met(contract, value):
+    _model_says({"met": value, "confidence": "high", "rationale": "untrusted"})
+    contract.adjudicate("bad", "condition", "{}")
+    assert json.loads(contract.get_adjudication("bad"))["met"] is False
+
+@pytest.mark.parametrize("field", ["amountIsPercent", "triggerAbove"])
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, [], {}])
+def test_malformed_trade_flag_rejected(contract, field, value):
+    payload = {"kind": "swap", "tokenIn": "rUSDC", "tokenOut": "rWETH",
+               "amount": "100", "amountIsPercent": False, "triggerAbove": False,
+               "confidence": "high"}
+    payload[field] = value
+    _model_says(payload)
+    assert _interpret(contract, "swap 100 USDC for ETH")["ok"] is False
+
+def test_result_cannot_be_overwritten(contract):
+    _model_says({"met": True, "confidence": "high", "rationale": "original"})
+    contract.adjudicate("immutable", "first", "{}")
+    original = contract.get_adjudication("immutable")
+    _model_says({"met": False, "confidence": "high", "rationale": "changed"})
+    with pytest.raises(Exception):
+        contract.adjudicate("immutable", "different", "{}")
+    assert contract.get_adjudication("immutable") == original

@@ -1,9 +1,10 @@
-# v0.2.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+# v0.3.0
 
 from genlayer import *
 
 import json
+import hashlib
 import re
 
 
@@ -146,6 +147,7 @@ class RoqueInterpreter(gl.Contract):
     # request id -> adjudication JSON, for the subjective "did this happen yet"
     # questions a price feed can never answer.
     adjudications: TreeMap[str, str]
+    request_bindings: TreeMap[str, str]
 
     def __init__(self) -> None:
         pass
@@ -165,6 +167,9 @@ class RoqueInterpreter(gl.Contract):
         purpose and stashes the answer, which keeps the simulator from tripping
         over return serialisation on the nondet path.
         """
+        binding = self._bind("interpret", request_id, command, context_json)
+        if request_id in self.interpretations:
+            return
         canonical = command.strip()
 
         def read_intent() -> str:
@@ -189,7 +194,9 @@ class RoqueInterpreter(gl.Contract):
         )
 
         stored = self._safe_store(consensus, canonical)
-        self.interpretations[request_id] = stored
+        result = json.loads(stored)
+        result.update(binding)
+        self.interpretations[request_id] = json.dumps(result, sort_keys=True)
 
     def _build_prompt(self, command: str, context_json: str) -> str:
         token_lines = "\n".join(f"- {sym}: {_TOKEN_BLURB[sym]}" for sym in KNOWN_TOKENS)
@@ -236,7 +243,9 @@ Rules:
 - "half", "all", "25 percent" set amountIsPercent true and amount the number
   only ("50", "100", "25").
 - Resting limit orders track ether's dollar price only, so use "limit" solely
-  when rWETH is one of the two tokens. For any other pair use "swap". For a
+  when rWETH is one of the two tokens. Preserve conditional requests as "limit"
+  even for unsupported pairs so validation can reject them. Never turn a
+  conditional request into an immediate swap. For a
   limit, triggerPrice is that ETH/USD price, triggerAbove is true when the order
   should fire as the price rises ("if it goes above", "when it hits") and false
   when it should fire as the price falls ("if it drops below", "buy the dip").
@@ -300,7 +309,20 @@ Rules:
             reject["error"] = "model returned no usable object"
             return reject
 
-        kind = str(candidate.get("kind", "unknown")).strip().lower()
+        if candidate.get("ok") is False:
+            reject["error"] = str(candidate.get("error", "rejected interpretation"))[:500]
+            return reject
+        for field in ("amountIsPercent", "triggerAbove"):
+            if type(candidate.get(field)) is not bool:
+                reject["error"] = "missing or malformed boolean: " + field
+                return reject
+        if candidate.get("confidence") not in ("high", "medium"):
+            reject["error"] = "missing, invalid or low confidence"
+            return reject
+        if not isinstance(candidate.get("amount"), str) or len(candidate["amount"]) > 78:
+            reject["error"] = "amount must be a bounded decimal string"
+            return reject
+        kind = candidate.get("kind", "unknown")
         if kind not in ("swap", "limit"):
             reject["error"] = "not a recognisable buy or sell"
             reject["reason"] = str(candidate.get("reason", ""))[:200]
@@ -327,7 +349,7 @@ Rules:
             reject["error"] = "amount is zero"
             return reject
 
-        is_percent = bool(candidate.get("amountIsPercent", False))
+        is_percent = candidate["amountIsPercent"]
         if is_percent and not self._percent_in_range(amount):
             reject["error"] = "percent must be between 0 and 100"
             return reject
@@ -351,7 +373,7 @@ Rules:
                 return reject
 
         trigger_price = ""
-        trigger_above = bool(candidate.get("triggerAbove", False))
+        trigger_above = candidate["triggerAbove"]
         if kind == "limit":
             # The book only knows ether's price, so a limit is only coherent when
             # ether is one side of the trade. Everything else becomes a plain
@@ -426,7 +448,7 @@ Rules:
         try:
             parsed = json.loads(consensus_json)
             if isinstance(parsed, dict):
-                return json.dumps(parsed, sort_keys=True)
+                return json.dumps(self._validate_and_normalize(parsed, command), sort_keys=True)
         except Exception:
             pass
         return json.dumps(
@@ -452,6 +474,9 @@ Rules:
         plain yes or no with a short reason. Same trust story as everything else
         here: it decides nothing on its own, it only advises the relayer.
         """
+        binding = self._bind("adjudicate", request_id, condition, evidence_json)
+        if request_id in self.adjudications:
+            return
         cond = condition.strip()
 
         def judge() -> str:
@@ -472,7 +497,7 @@ Answer with ONLY this JSON, no prose:
 """.strip()
             raw = gl.nondet.exec_prompt(prompt)
             candidate = self._extract_json(raw)
-            met = bool(candidate.get("met", False))
+            met = candidate.get("met") is True and candidate.get("confidence") == "high"
             confidence = self._clean_confidence(candidate.get("confidence"))
             rationale = str(candidate.get("rationale", ""))[:300]
             return json.dumps(
@@ -484,7 +509,7 @@ Answer with ONLY this JSON, no prose:
             judge,
             """
             Compare the two verdicts. They agree only when the boolean "met" is
-            identical. Return either matching object when they agree.
+            identical and confidence is identical. Return either matching object when they agree.
             """,
         )
 
@@ -496,7 +521,26 @@ Answer with ONLY this JSON, no prose:
                 {"met": False, "confidence": "low", "rationale": "no agreement"},
                 sort_keys=True,
             )
-        self.adjudications[request_id] = stored
+        result = json.loads(stored)
+        if type(result.get("met")) is not bool or result.get("confidence") not in ("high", "medium", "low"):
+            result = {"met": False, "confidence": "low", "rationale": "invalid consensus"}
+        if result.get("confidence") != "high":
+            result["met"] = False
+        result.update(binding)
+        self.adjudications[request_id] = json.dumps(result, sort_keys=True)
+
+    def _bind(self, operation: str, request_id: str, text: str, context: str) -> dict:
+        if not request_id or len(request_id) > 128 or len(text) > 2000 or len(context) > 20000:
+            raise gl.vm.UserError("INPUT: oversized or empty request")
+        creator = str(gl.message.sender_account).lower()
+        digest = hashlib.sha256(json.dumps([operation, text, context], separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        identity = {"requestId": request_id, "creator": creator, "inputHash": digest}
+        key = operation + ":" + request_id
+        serialized = json.dumps(identity, sort_keys=True)
+        if key in self.request_bindings and self.request_bindings[key] != serialized:
+            raise gl.vm.UserError("AUTH: conflicting request identity")
+        self.request_bindings[key] = serialized
+        return identity
 
     # ─────────────────────────────────────────────────────────────
     # Views
