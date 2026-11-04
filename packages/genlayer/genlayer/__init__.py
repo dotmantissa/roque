@@ -108,7 +108,7 @@ class _GL:
             return instance
 
     class message:
-        sender_account = "0x0000000000000000000000000000000000000001"
+        sender_address = "0x0000000000000000000000000000000000000001"
 
     class vm:
         class UserError(Exception):
@@ -140,3 +140,12 @@ class Address(str):
 
 # Re-export the names a contract pulls in via `from genlayer import *`.
 __all__ = ["gl", "TreeMap", "DynArray", "u256", "Address", "set_prompt_response"]
+
+# Current runner module-style API, retaining deterministic local behavior.
+from types import SimpleNamespace
+contract = SimpleNamespace(Contract=gl.Contract)
+message = gl.message
+vm = gl.vm
+public = gl.public
+nondet = gl.nondet
+eq_principle = gl.eq_principle

@@ -9,6 +9,7 @@ import {privateKeyToAccount,generatePrivateKey} from 'viem/accounts';
 import {sepolia} from 'viem/chains';
 import {createClient,createAccount} from 'genlayer-js';
 import {studionet} from 'genlayer-js/chains';
+import {assertFinalizedConsensus,ConsensusExecutionError} from "../src/consensus.js";
 import {TransactionStatus} from 'genlayer-js/types';
 const root=resolve(import.meta.dirname,'../../..'),config=join(homedir(),'.config/roque-deployment');
 const statePath=join(config,'release-state.json'),generatedPath=join(config,'generated.production.env');
@@ -34,7 +35,7 @@ const client=createPublicClient({chain:sepolia,transport:http(rpc),cacheTime:0})
 const wallet=createWalletClient({account:deployer,chain:sepolia,transport:http(rpc)});
 const registryPath=join(root,'contracts/deployments/sepolia.json'),sharedPath=join(root,'packages/shared/src/deployment.json');
 const registry=JSON.parse(await readFile(registryPath,'utf8'));
-type Journal={operations:Record<string,{hash:Hex;raw:Hex;receipt?:{address?:Hex;blockNumber:string}}>;executor?:Hex;genlayerHash?:Hex;interpreter?:Hex;lastError?:string};
+type Journal={operations:Record<string,{hash:Hex;raw:Hex;receipt?:{address?:Hex;blockNumber:string}}>;executor?:Hex;genlayerHash?:Hex;interpreter?:Hex;failedGenlayerDeployments?:Hex[];lastError?:string};
 let journal:Journal={operations:{}};try{journal=JSON.parse(await readFile(statePath,'utf8'));}catch{}
 const save=()=>atomic(statePath,JSON.stringify(journal,null,2)+'\n');
 const artifact=JSON.parse(await readFile(join(root,'contracts/out/AgentExecutor.sol/AgentExecutor.json'),'utf8'));
@@ -77,11 +78,15 @@ async function main(){
   const source=await readFile(join(root,'packages/genlayer/contracts/roque_interpreter.py'),'utf8');
   if(!journal.genlayerHash){journal.genlayerHash=await gl.deployContract({code:new TextEncoder().encode(source),args:[]});await save();console.log(`Interpreter deployment submitted: ${journal.genlayerHash}`);}
   const receipt=await gl.waitForTransactionReceipt({hash:journal.genlayerHash as Parameters<typeof gl.waitForTransactionReceipt>[0]["hash"],status:TransactionStatus.FINALIZED,retries:100,interval:3000});
-  if(receipt.status!==TransactionStatus.FINALIZED)throw new Error('Interpreter deployment is not finalized.');
-  const leaders=receipt.consensus_data?.leader_receipt??[];
-  if(receipt.txExecutionResult===2||receipt.txExecutionResultName==='FINISHED_WITH_ERROR'||leaders.some(r=>r.error||r.execution_result==='ERROR'))throw new Error('Interpreter constructor failed.');
-  const data=receipt.data??{};
-  const address=(data.contract_address??data.contractAddress??data.new_contract_address??receipt.to_address??receipt.recipient) as Hex;
+  const full=await gl.getTransaction({hash:journal.genlayerHash as Parameters<typeof gl.getTransaction>[0]["hash"]});
+  try{assertFinalizedConsensus(full);}catch(err){
+   if(err instanceof ConsensusExecutionError && typeof full.data?.contract_code==='string' && Buffer.from(full.data.contract_code,'base64').toString('utf8')!==source){
+    journal.failedGenlayerDeployments=[...(journal.failedGenlayerDeployments??[]),journal.genlayerHash!];delete journal.genlayerHash;await save();return main();
+   }
+   throw err;
+  }
+  const data=full.data??{};
+  const address=(data.contract_address??data.contractAddress??data.new_contract_address??full.to_address??full.recipient) as Hex;
   if(!/^0x[a-fA-F0-9]{40}$/u.test(address??'')||/^0x0{40}$/u.test(address)||address.toLowerCase()===gl.account!.address.toLowerCase())throw new Error('Deployment receipt lacks an explicit contract address.');
   if(await gl.getContractCode(address)!==source)throw new Error('Deployed interpreter source differs.');
   await gl.getContractSchema(address);

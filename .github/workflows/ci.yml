@@ -146,7 +146,7 @@ jobs:
 
       - name: Validate the GenVM contract
         if: matrix.python-version == '3.12'
-        run: uv run genvm-lint check contracts/roque_interpreter.py --json
+        run: uv run python scripts/lint.py check contracts/roque_interpreter.py --json
 
   dependency-review:
     name: Dependency review

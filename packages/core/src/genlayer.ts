@@ -15,6 +15,7 @@
 import { createClient, createAccount, generatePrivateKey } from "genlayer-js";
 import { studionet, testnetAsimov } from "genlayer-js/chains";
 import { createHash } from "node:crypto";
+import {assertFinalizedConsensus,ConsensusExecutionError} from "./consensus.js";
 import { TransactionStatus } from "genlayer-js/types";
 import { interpretationSchema, adjudicationSchema } from "./validation.js";
 import { publicEnv } from "./env.js";
@@ -107,6 +108,7 @@ async function withRetry<T>(what: string, fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (err) {
+      if(err instanceof ConsensusExecutionError)throw err;
       lastErr = err;
       if (!isTransient(err) || attempt === 3) break;
       await sleep(1000 * (attempt + 1));
@@ -160,10 +162,10 @@ async function waitForReceipt(
   while (Date.now() < deadline) {
     try {
       const receipt = await gl.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 8, interval: 3000 });
-      if (receipt.status !== TransactionStatus.FINALIZED) throw new Error("Consensus is not final.");
-      if (receipt.txExecutionResult === 2 || receipt.txExecutionResultName === "FINISHED_WITH_ERROR" || receipt.consensus_data?.leader_receipt?.some(r => r.error || r.execution_result === "ERROR")) throw new Error("Consensus execution failed.");
+      assertFinalizedConsensus(receipt);
       return receipt;
     } catch (err) {
+      if(err instanceof ConsensusExecutionError)throw err;
       lastErr = err;
       if (Date.now() >= deadline) break;
       await sleep(2000);
