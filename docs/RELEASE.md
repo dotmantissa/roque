@@ -26,7 +26,7 @@ Every EVM release operation reuses the journal's original signed bytes/hash afte
 
 ## Earlier vaults and rollback
 
-The old executor is immutable. Balances, capability state, used signatures and holds do not migrate. Earlier addresses stay in `legacyExecutors`, with domain/version/block metadata; the UI provides owner revoke, releaseOwnCommitment and available-balance withdrawal. Find hold IDs in the earlier contract's indexed Committed events. Owner exits do not require the relayer or healthy price feed. Existing OrderBook orders and pool liquidity remain at their current addresses.
+The old executor is immutable. Balances, capability state, used signatures and holds do not migrate. Earlier addresses stay in `legacyExecutors`, with domain/version/block metadata. Owners can call revoke, releaseOwnCommitment and available-balance withdrawal directly on the earlier contracts. The earlier-vault recovery panel has been removed from the app. Find hold IDs in the earlier contract's indexed Committed events. Owner exits do not require the relayer or healthy price feed. Existing OrderBook orders and pool liquidity remain at their current addresses.
 
 Before cutover, rollback means keeping the old app/book active while repairing the staged release. After cutover, avoid blindly reverting to old source or exposing a v2 ABI against a v1 address. Coordinate an app version with its registry and keep legacy exits available. New v2 vaults may hold user funds even if the old book is restored; those owners must retain v2 withdrawal/release access. Never transfer users' balances administratively.
 

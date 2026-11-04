@@ -33,7 +33,7 @@ Source baseline: `a0c34f6`. Implementation: `cfa7e05`, `9ba8f5b`, `147502c`, `05
 - Unused upstream OpenZeppelin npm development manifests are removed. Their stale lockfile accounted for 114 additional repository alerts; Roque's Foundry build consumes the existing Solidity files directly, and the library code/license are retained. No advisory exclusion is used.
 - Public price responses omit unavailable assets and list them explicitly; one stale feed cannot disable healthy price displays. Incomplete wallet valuations are labeled. Financial checks still reject missing/stale prices, and backend feed reads additionally reject zero/incomplete rounds.
 - Future OrderBook deployments reject disabled freshness, malformed rounds, zero/future timestamps and invalid feed decimals. The existing live OrderBook retains its immutable bytecode; release checks require its existing nonzero freshness configuration and successful price read.
-- Earlier vault addresses, domain versions and blocks remain in the registry, with owner revoke/release/withdraw controls in the UI.
+- Earlier vault addresses, domain versions and blocks remain in the registry. Owners can call revoke/release/withdraw directly on those contracts; the earlier-vault recovery panel is no longer part of the app.
 
 ## Validation and remaining release gates
 
