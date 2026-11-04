@@ -219,3 +219,5 @@ export const eip712Types = {
 } as const;
 
 export { deployment };
+
+export type {SwapPlan,TransactionStep} from "./public-api.js";

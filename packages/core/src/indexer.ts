@@ -14,6 +14,7 @@
 import { formatUnits } from "viem";
 import { addresses, abis, tokenByAddress } from "@roque/shared";
 import { publicClient } from "./chain.js";
+import { acquireLease, releaseLease } from "./leases.js";
 import { q } from "./db/index.js";
 
 /**
@@ -36,7 +37,7 @@ export const DEPLOY_BLOCK = 11_463_289n;
 // limits with headroom to spare.
 const MAX_RANGE = 800n;
 
-const BOOKMARK_KEY = "last_block";
+const BOOKMARK_KEY = `last_block:${addresses.agentExecutor.toLowerCase()}:${addresses.orderBook.toLowerCase()}`;
 
 interface ScanResult {
   fromBlock: bigint;
@@ -51,7 +52,7 @@ interface ScanResult {
  */
 export async function indexOnce(): Promise<ScanResult> {
   const client = publicClient();
-  const latest = await client.getBlockNumber();
+  const latest = (await client.getBlockNumber()) - 12n;
 
   const bookmark = await readBookmark();
   const fromBlock = bookmark + 1n;
@@ -60,20 +61,34 @@ export async function indexOnce(): Promise<ScanResult> {
   }
   const toBlock = fromBlock + MAX_RANGE - 1n > latest ? latest : fromBlock + MAX_RANGE - 1n;
 
-  // Claim the window before scanning it. Two indexers reading the same bookmark
-  // both scanned the same blocks and both wrote the same rows; the (tx_hash,
-  // log_index) key meant nothing was double counted, so the only cost was a pile
-  // of wasted getLogs calls against a public RPC with a rate limit. Moving the
-  // bookmark first, conditional on it still saying what we read, means the loser
-  // skips the window instead. The trade is that a crash mid-scan loses that
-  // window's rows rather than replaying them, which the backfill below picks up
-  // anyway and which is the cheaper of the two failures.
-  if (!(await claimWindow(bookmark, toBlock))) {
-    return { fromBlock, toBlock: bookmark, rows: 0 };
-  }
+  const lease=await acquireLease(`index:${BOOKMARK_KEY}`,120);
+  if(!lease) return {fromBlock,toBlock:bookmark,rows:0};
+  try {
+    const checkpoint=await q<{block_hash:string}>("SELECT block_hash FROM indexer_blocks WHERE deployment=$1 AND block_number=$2",[BOOKMARK_KEY,bookmark.toString()]);
+    if(checkpoint[0]) {
+      const canonical=await client.getBlock({blockNumber:bookmark});
+      if(canonical.hash!==checkpoint[0].block_hash) {
+        const ancestors=await q<{block_number:string;block_hash:string}>("SELECT block_number,block_hash FROM indexer_blocks WHERE deployment=$1 AND block_number<$2 ORDER BY block_number DESC LIMIT 100",[BOOKMARK_KEY,bookmark.toString()]);
+        let ancestor=DEPLOY_BLOCK-1n;
+        for(const candidate of ancestors) {
+          if((await client.getBlock({blockNumber:BigInt(candidate.block_number)})).hash===candidate.block_hash) {ancestor=BigInt(candidate.block_number);break;}
+        }
+        const rewind=ancestor+1n;
+        await q(`WITH owned AS (SELECT 1 FROM worker_leases WHERE key=$3 AND owner=$4 AND generation=$5 AND expires_at>now()),
+          removed AS (DELETE FROM trades WHERE block_number >= $1 AND deployment=$2 AND EXISTS(SELECT 1 FROM owned)),
+          blocks AS (DELETE FROM indexer_blocks WHERE deployment=$2 AND block_number >= $1 AND EXISTS(SELECT 1 FROM owned))
+          UPDATE indexer_state SET value=$6 WHERE key=$2 AND value=$7 AND EXISTS(SELECT 1 FROM owned)`,
+          [rewind.toString(),BOOKMARK_KEY,lease.key,lease.owner,lease.generation,ancestor.toString(),bookmark.toString()]);
+        return {fromBlock:rewind,toBlock:rewind-1n,rows:0};
+      }
+    }
+    const rows=await scanRange(fromBlock,toBlock);
+    const block=await client.getBlock({blockNumber:toBlock});
+    await q("INSERT INTO indexer_blocks(deployment,block_number,block_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",[BOOKMARK_KEY,toBlock.toString(),block.hash]);
+    if(!await claimWindow(bookmark,toBlock,lease)) throw new Error("Indexer lost checkpoint ownership.");
+    return {fromBlock,toBlock,rows};
+  } finally {await releaseLease(lease);}
 
-  const rows = await scanRange(fromBlock, toBlock);
-  return { fromBlock, toBlock, rows };
 }
 
 /**
@@ -312,8 +327,8 @@ async function insertTrade(row: TradeRow): Promise<number> {
   const rows = await q(
     `INSERT INTO trades
        (kind, user_address, token_in, token_out, amount_in, amount_out, usd_value,
-        order_id, price, tx_hash, log_index, block_number, block_time)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        order_id, price, tx_hash, log_index, block_number, block_time, deployment)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (tx_hash, log_index) DO NOTHING
      RETURNING id`,
     [
@@ -330,6 +345,7 @@ async function insertTrade(row: TradeRow): Promise<number> {
       row.logIndex,
       row.blockNumber.toString(),
       row.blockTime ? new Date(row.blockTime * 1000).toISOString() : null,
+      BOOKMARK_KEY,
     ],
   );
   return rows.length;
@@ -364,7 +380,7 @@ async function readOrder(id: bigint): Promise<OnChainOrder | null> {
     })) as OnChainOrder;
     return o;
   } catch {
-    return null;
+    throw new Error("Order attribution could not be read; range will be retried.");
   }
 }
 
@@ -400,7 +416,7 @@ async function readBookmark(): Promise<bigint> {
  * unable to tell "I claimed this" from "somebody claimed exactly this", which
  * is precisely the pair that has to be distinguishable.
  */
-async function claimWindow(from: bigint, to: bigint): Promise<boolean> {
+async function claimWindow(from: bigint, to: bigint, lease: {key:string;owner:string;generation:string}): Promise<boolean> {
   await q(
     `INSERT INTO indexer_state (key, value, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (key) DO NOTHING`,
@@ -408,8 +424,8 @@ async function claimWindow(from: bigint, to: bigint): Promise<boolean> {
   );
   const claimed = await q<{ key: string }>(
     `UPDATE indexer_state SET value=$2, updated_at=now()
-      WHERE key=$1 AND value=$3 RETURNING key`,
-    [BOOKMARK_KEY, to.toString(), from.toString()],
+      WHERE key=$1 AND value=$3 AND EXISTS(SELECT 1 FROM worker_leases WHERE key=$4 AND owner=$5 AND generation=$6 AND expires_at>now()) RETURNING key`,
+    [BOOKMARK_KEY, to.toString(), from.toString(),lease.key,lease.owner,lease.generation],
   );
   return claimed.length === 1;
 }

@@ -307,7 +307,7 @@ describe("vaultFundingNeeds", () => {
     // the rUSDC is the vault's problem.
     const needs = vaultFundingNeeds([
       leg({ where: "Step 1" }),
-      leg({ tokenIn: "rWETH", tokenOut: "rUSDC", amount: "1", where: "Step 2" }),
+      leg({ tokenIn: "rWETH", tokenOut: "rUSDC", amount: "100", amountIsPercent: true, where: "Step 2" }),
     ]);
     expect(needs.map((n) => n.symbol)).toEqual(["rUSDC"]);
     expect(needs[0].raw).toBe(100_000_000n);

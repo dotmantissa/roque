@@ -5,7 +5,7 @@
  * cryptography that must be exactly right regardless of what any chain says.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { recoverTypedDataAddress, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { eip712Domain, eip712Types } from "@roque/shared";
@@ -25,6 +25,8 @@ import {
 
 // A throwaway key so the test is self-contained. The env var lets intents.ts
 // build the agent account; we assert signatures recover to this same address.
+vi.mock("../src/chain.js", () => ({publicClient:()=>({readContract:vi.fn().mockResolvedValue(1n)})}));
+
 const TEST_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
 const TEST_ADDRESS = privateKeyToAccount(TEST_KEY).address;
 process.env.AGENT_SIGNER_PRIVATE_KEY = TEST_KEY;
@@ -81,7 +83,7 @@ describe("agent intent signing", () => {
       domain: eip712Domain,
       types: { SwapIntent: eip712Types.SwapIntent },
       primaryType: "SwapIntent",
-      message: intent,
+      message: {...intent,capabilityGeneration:1n},
       signature: sig,
     });
     expect(recovered.toLowerCase()).toBe(TEST_ADDRESS.toLowerCase());
@@ -106,7 +108,7 @@ describe("agent intent signing", () => {
       domain: eip712Domain,
       types: { LimitIntent: eip712Types.LimitIntent },
       primaryType: "LimitIntent",
-      message: intent,
+      message: {...intent,capabilityGeneration:1n},
       signature: sig,
     });
     expect(recovered.toLowerCase()).toBe(TEST_ADDRESS.toLowerCase());

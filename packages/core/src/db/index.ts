@@ -8,14 +8,15 @@
  */
 
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-import { serverEnv } from "../env.js";
+import { migration0002 } from "./migrations/0002-public-api.js";
+import { databaseUrl } from "../env.js";
 
 let _sql: NeonQueryFunction<false, false> | undefined;
 
 /** The shared SQL tag. Neon's driver is HTTP based, so this is serverless safe. */
 export function sql(): NeonQueryFunction<false, false> {
   if (!_sql) {
-    _sql = neon(serverEnv().databaseUrl);
+    _sql = neon(databaseUrl());
   }
   return _sql;
 }
@@ -31,6 +32,8 @@ export async function q<T = Record<string, unknown>>(
   params: unknown[] = [],
 ): Promise<T[]> {
   const db = sql();
+  // A commit-then-timeout must never replay a mutation or conditional claim.
+  const readOnly = /^\s*SELECT\b/iu.test(text);
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
@@ -38,7 +41,7 @@ export async function q<T = Record<string, unknown>>(
       return (Array.isArray(rows) ? rows : ((rows as { rows?: T[] }).rows ?? [])) as T[];
     } catch (err) {
       lastErr = err;
-      if (!isTransient(err) || attempt === 3) break;
+      if (!readOnly || !isTransient(err) || attempt === 3) break;
       await sleep(250 * (attempt + 1));
     }
   }
@@ -179,7 +182,7 @@ CREATE TABLE IF NOT EXISTS event_orders (
   amount_is_percent  BOOLEAN NOT NULL DEFAULT false,
   slippage_bps       INTEGER NOT NULL DEFAULT 100,
   status             TEXT NOT NULL DEFAULT 'screening'
-                       CHECK (status IN ('screening','screened','rejected','armed','firing','filled','failed','expired','cancelled')),
+                       CHECK (status IN ('screening','screened','rejected','arming','armed','firing','filled','failed','expired','cancelled')),
   screen_verdict     TEXT CHECK (screen_verdict IN ('verifiable','unverifiable')),
   screen_reason      TEXT,
   screen_confidence  TEXT,
@@ -216,7 +219,7 @@ CREATE TABLE IF NOT EXISTS playbooks (
   name            TEXT NOT NULL,
   note            TEXT,
   status          TEXT NOT NULL DEFAULT 'draft'
-                    CHECK (status IN ('draft','armed','completed','cancelled','failed')),
+                    CHECK (status IN ('draft','arming','armed','completed','cancelled','failed')),
   steps           JSONB NOT NULL DEFAULT '[]'::jsonb,
   step_cursor     INTEGER NOT NULL DEFAULT 0,
   slippage_bps    INTEGER NOT NULL DEFAULT 100,
@@ -362,7 +365,7 @@ CREATE INDEX IF NOT EXISTS idx_vault_res_source
 -- turned a sentence into a live commitment with nobody pressing anything.
 ALTER TABLE event_orders DROP CONSTRAINT IF EXISTS event_orders_status_check;
 ALTER TABLE event_orders ADD CONSTRAINT event_orders_status_check
-  CHECK (status IN ('screening','screened','rejected','armed','firing','filled','failed','expired','cancelled'));
+  CHECK (status IN ('screening','screened','rejected','arming','armed','firing','filled','failed','expired','cancelled'));
 
 -- 'firing' is the brief window between claiming an order and knowing what the
 -- swap did. It exists so two workers cannot both fill one verdict: the claim is
@@ -389,7 +392,7 @@ export async function ensureSchema(): Promise<void> {
   // Neon's HTTP driver runs one statement per call, so split the DDL and run the
   // pieces in order. Splitting on a blank-line-preceded semicolon keeps the
   // CHECK-clause semicolons inside a statement from tripping us up.
-  const statements = SCHEMA_SQL.split(/;\s*\n/)
+  const statements = (SCHEMA_SQL + "\n" + migration0002).split(/;\s*\n/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   for (const stmt of statements) {

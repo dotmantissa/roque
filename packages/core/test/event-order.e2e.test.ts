@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   getCommitment: vi.fn(),
 }));
 
+vi.mock("../src/settlement.js",()=>({vaultSettlement:vi.fn(async()=>stranded?{status:"pending",txHash:TX}:{status:"confirmed",txHash:TX,amountOutRaw:"1000000000000000000"})}));
 vi.mock("../src/db/index.js", () => ({ q: state.q }));
 // Writing an order reads the vault balance. Stubbing the read keeps the real
 // funding gate in the loop with a balance the test chooses.
@@ -37,6 +38,7 @@ vi.mock("../src/intents.js", () => ({
   lockCommitments: state.lockCommitments,
   releaseCommitments: state.releaseCommitments,
   getCommitment: state.getCommitment,
+  NO_COMMITMENT: "0x"+"00".repeat(32),
 }));
 vi.mock("../src/genlayer.js", () => ({ adjudicate: state.adjudicate, interpret: vi.fn() }));
 vi.mock("../src/services.js", () => ({
@@ -138,6 +140,8 @@ beforeEach(() => {
     sqls.push(text);
     const t = text.replace(/\s+/gu, " ").trim();
 
+    if(t.includes("WHERE status='firing'")) return row.status==='firing'?[{...row}]:[];
+    if(t.includes("WHERE status='arming'")) return row.status==='arming'?[{...row}]:[];
     if (t.startsWith("SELECT")) {
       // Honour the owner filter when the statement carries one. The ownership
       // guard is security-relevant, so a mock that answered regardless of who
@@ -165,6 +169,9 @@ beforeEach(() => {
       Object.assign(row, { last_checked_at: new Date().toISOString() });
       return screening ? [{ id: row.id }] : [{ ...row }];
     }
+    if(t.includes("SET status='firing', tx_hash=$2")){Object.assign(row,{tx_hash:params[1]});return [{...row}];}
+    if(t.includes("SET status=$2,tx_hash=$3")){Object.assign(row,{status:params[1],tx_hash:params[2],error:params[3]});return [{...row}];}
+    if(t.includes("SET status='armed',updated_at")){if(row.status!=="arming")return [];Object.assign(row,{status:"armed"});return [{...row}];}
     if (t.includes("SET status='firing'")) {
       if (row.status !== "armed") return [];
       Object.assign(row, { status: "firing" });
@@ -252,12 +259,12 @@ beforeEach(() => {
     }
     // Arming rolled back because the chain would not take the hold.
     if (t.includes("SET status='screened', error=$2")) {
-      if (row.status !== "armed") return [];
+      if (row.status !== "arming") return [];
       Object.assign(row, { status: "screened", error: params[1] });
       return [];
     }
-    if (t.includes("SET status='armed', error=NULL")) {
-      Object.assign(row, { status: "armed", error: null });
+    if (t.includes("SET status='arming', error=NULL")) {
+      Object.assign(row, { status: "arming", error: null });
       return [{ ...row }];
     }
     if (t.includes("SET status='cancelled'")) {
@@ -520,7 +527,7 @@ describe("evaluateEventOrder", () => {
 
   it("stays armed after a transient chain error, so the next tick tries again", async () => {
     row = armed({ verdict_met: true, checks: 0 });
-    state.executeVaultSwap.mockRejectedValue(new Error("fetch failed"));
+    state.preflightVaultSwap.mockRejectedValue(new Error("fetch failed"));
 
     const order = await evaluateEventOrder("ev-1");
 
@@ -530,7 +537,7 @@ describe("evaluateEventOrder", () => {
 
   it("fails outright on a refusal the next attempt would earn again", async () => {
     row = armed({ verdict_met: true, checks: 0 });
-    state.executeVaultSwap.mockRejectedValue(
+    state.preflightVaultSwap.mockRejectedValue(
       new Error("This trade ($600.00) exceeds your per-trade limit of $500.00."),
     );
 
@@ -542,7 +549,7 @@ describe("evaluateEventOrder", () => {
 
   it("gives up once the fill attempts are spent, so a broken order cannot burn gas forever", async () => {
     row = armed({ verdict_met: true, checks: 2 });
-    state.executeVaultSwap.mockRejectedValue(new Error("fetch failed"));
+    state.preflightVaultSwap.mockRejectedValue(new Error("fetch failed"));
 
     const order = await evaluateEventOrder("ev-1");
 
@@ -654,7 +661,7 @@ describe("what an event order promises the vault", () => {
     row = armed({ verdict_met: true, checks: 0 });
     held.hold({ user_address: user, token: "rUSDC", amount_raw: "100000000", source_id: "ev-1" });
     state.preflightVaultSwap.mockResolvedValue({ amountIn: 1n });
-    state.executeVaultSwap.mockRejectedValue(new Error("fetch failed"));
+    state.preflightVaultSwap.mockRejectedValue(new Error("fetch failed"));
 
     const order = await evaluateEventOrder("ev-1");
 
@@ -666,7 +673,7 @@ describe("what an event order promises the vault", () => {
     row = armed({ verdict_met: true, checks: 2 });
     held.hold({ user_address: user, token: "rUSDC", amount_raw: "100000000", source_id: "ev-1" });
     state.preflightVaultSwap.mockResolvedValue({ amountIn: 1n });
-    state.executeVaultSwap.mockRejectedValue(new Error("fetch failed"));
+    state.preflightVaultSwap.mockRejectedValue(new Error("fetch failed"));
 
     const order = await evaluateEventOrder("ev-1");
 
@@ -704,6 +711,17 @@ describe("what an event order promises the vault", () => {
  * guard below is about the same moment arriving twice.
  */
 describe("two workers reaching the same order", () => {
+  it("retains a lost submission reply and keeps its hold", async () => {
+    row = armed({verdict_met:true,checks:0});
+    held.hold({user_address:user,token:"rUSDC",amount_raw:"100000000",source_id:"ev-1"});
+    state.executeVaultSwap.mockRejectedValue(new Error("RPC reply lost after broadcast"));
+    const order = await evaluateEventOrder("ev-1");
+    expect(order.status).toBe("firing");
+    expect(held.held()).toHaveLength(1);
+    await evaluateEventOrder("ev-1");
+    expect(state.executeVaultSwap).toHaveBeenCalledTimes(1);
+  });
+
   const met = {
     met: true,
     confidence: "high" as const,
@@ -756,6 +774,7 @@ describe("two workers reaching the same order", () => {
     // The sweep used to take any armed row past its date, including one the
     // fill had already claimed, which released the hold the trade was spending.
     row = baseRow({ status: "firing", expires_at: "2020-01-01T00:00:00.000Z" });
+    stranded = true;
 
     const result = await eventTick();
 
@@ -769,7 +788,7 @@ describe("two workers reaching the same order", () => {
     expect(row.status).toBe("firing");
   });
 
-  it("gives up on an order left mid-trade rather than trading again", async () => {
+  it("retains an unknown mid-trade outcome without trading again", async () => {
     // We cannot tell from here whether the swap landed, so retrying risks
     // spending twice. Failing is the direction that cannot cost the person
     // money they did not agree to.
@@ -778,7 +797,7 @@ describe("two workers reaching the same order", () => {
 
     await eventTick();
 
-    expect(row.status).toBe("failed");
+    expect(row.status).toBe("firing");
     expect(state.executeVaultSwap).not.toHaveBeenCalled();
   });
 });

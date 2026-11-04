@@ -205,7 +205,15 @@ export async function reserve(legs: ReservationInput[]): Promise<void> {
     });
   }
 
-  await lockCommitments(intents);
+  const batchId = `hold:${legs[0].source}:${legs[0].sourceId}:${randomUUID()}`;
+  await q("INSERT INTO reservation_batches(id,source_kind,source_id,payload) VALUES($1,$2,$3,$4::jsonb)",
+    [batchId,legs[0].source,legs[0].sourceId,JSON.stringify({prepared,intents},(_key,value)=>typeof value==="bigint"?value.toString():value)]);
+  await lockCommitments(intents,batchId);
+  await persistReservations(prepared);
+  await q("UPDATE reservation_batches SET status='held' WHERE id=$1",[batchId]);
+}
+
+async function persistReservations(prepared:Array<{leg:ReservationInput;token:TokenMeta;raw:bigint;percent:number|null;id:`0x${string}`}>) {
 
   for (const item of prepared) {
     await q(
@@ -233,6 +241,18 @@ export async function reserve(legs: ReservationInput[]): Promise<void> {
       ],
     );
   }
+}
+
+/** Resume the recorded hold with identical business data, including after a lost reply. */
+export async function recoverReservation(source:string,sourceId:string):Promise<boolean> {
+  const rows=await q<{id:string;payload:{prepared:Array<{leg:ReservationInput;token:TokenMeta;raw:string;percent:number|null;id:`0x${string}`}>;intents:Array<Record<string,string>>}}>(
+    "SELECT id,payload FROM reservation_batches WHERE source_kind=$1 AND source_id=$2 ORDER BY created_at DESC LIMIT 1",[source,sourceId]);
+  const batch=rows[0];if(!batch)return false;
+  const intents=batch.payload.intents.map(i=>({...i,amount:BigInt(i.amount),unlockAt:BigInt(i.unlockAt),nonce:BigInt(i.nonce),deadline:BigInt(i.deadline)})) as CommitIntent[];
+  await lockCommitments(intents,batch.id);
+  await persistReservations(batch.payload.prepared.map(p=>({...p,raw:BigInt(p.raw)})));
+  await q("UPDATE reservation_batches SET status='held' WHERE id=$1",[batch.id]);
+  return true;
 }
 
 /**

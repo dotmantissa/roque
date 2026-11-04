@@ -14,12 +14,15 @@
 
 import { createClient, createAccount, generatePrivateKey } from "genlayer-js";
 import { studionet, testnetAsimov } from "genlayer-js/chains";
+import { createHash } from "node:crypto";
+import { TransactionStatus } from "genlayer-js/types";
+import { interpretationSchema, adjudicationSchema } from "./validation.js";
 import { publicEnv } from "./env.js";
 
 export interface Interpretation {
   ok: boolean;
   kind: "swap" | "limit" | "unknown";
-  action?: "buy" | "sell";
+  action?: "buy" | "sell" | "swap";
   tokenIn: string;
   tokenOut: string;
   amount: string;
@@ -53,7 +56,9 @@ function pickChain() {
  */
 function client(): GLClient {
   if (!_client) {
-    const account = createAccount(generatePrivateKey());
+    const key=process.env.GENLAYER_CALLER_PRIVATE_KEY;
+    if(process.env.NODE_ENV === "production"&&!key) throw new Error("GENLAYER_CALLER_PRIVATE_KEY is required for durable job identity.");
+    const account = createAccount(key as `0x${string}` || generatePrivateKey());
     _client = createClient({ chain: pickChain(), account });
   }
   return _client;
@@ -69,14 +74,19 @@ function contractAddress(): `0x${string}` {
   return addr as `0x${string}`;
 }
 
-function parseJson<T>(raw: unknown, fallback: T): T {
-  if (typeof raw !== "string") return fallback;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
-  } catch {
-    return fallback;
-  }
+/** Changed evidence has its own immutable result; identical retries retain identity. */
+export function boundRequestId(id:string,operation:string,text:string,context:string):string {
+  return createHash("sha256").update(JSON.stringify([id,operation,text,context])).digest("hex");
+}
+
+function parseBoundResult(raw: unknown, operation: "interpret" | "adjudicate", requestId: string, text: string, context: string) {
+  if (typeof raw !== "string" || raw.length > 20000) throw new Error("Invalid GenLayer result.");
+  const result = JSON.parse(raw);
+  const expectedHash = createHash("sha256").update(JSON.stringify([operation, text, context])).digest("hex");
+  if (result.requestId !== requestId || result.inputHash !== expectedHash ||
+      result.creator?.toLowerCase() !== client().account?.address.toLowerCase())
+    throw new Error("GenLayer result identity mismatch.");
+  return result;
 }
 
 /**
@@ -149,7 +159,9 @@ async function waitForReceipt(
   let lastErr: unknown;
   while (Date.now() < deadline) {
     try {
-      return await gl.waitForTransactionReceipt({ hash, retries: 8, interval: 3000 });
+      const receipt = await gl.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 8, interval: 3000 });
+      if (receipt.status !== TransactionStatus.FINALIZED) throw new Error("Consensus is not final.");
+      return receipt;
     } catch (err) {
       lastErr = err;
       if (Date.now() >= deadline) break;
@@ -189,11 +201,13 @@ export async function interpret(
   const gl = client();
   const address = contractAddress();
 
+  const contextJson = JSON.stringify(context);
+  requestId = boundRequestId(requestId,"interpret",command,contextJson);
   const txHash = await withRetry("interpret submit", () =>
     gl.writeContract({
       address,
       functionName: "interpret",
-      args: [requestId, command, JSON.stringify(context)],
+      args: [requestId, command, contextJson],
       value: 0n,
     }),
   );
@@ -208,7 +222,7 @@ export async function interpret(
     }),
   );
 
-  return parseJson<Interpretation>(raw, { ...REFUSAL, error: "no interpretation stored" });
+  return interpretationSchema.parse(parseBoundResult(raw, "interpret", requestId, command, contextJson));
 }
 
 /** Read back an interpretation without triggering a fresh model run. */
@@ -220,7 +234,7 @@ export async function readInterpretation(requestId: string): Promise<Interpretat
       args: [requestId],
     }),
   );
-  return parseJson<Interpretation>(raw, REFUSAL);
+  return interpretationSchema.parse(typeof raw === "string" ? JSON.parse(raw) : null);
 }
 
 /**
@@ -236,11 +250,13 @@ export async function adjudicate(
   const gl = client();
   const address = contractAddress();
 
+  const evidenceJson = JSON.stringify(evidence);
+  requestId = boundRequestId(requestId,"adjudicate",condition,evidenceJson);
   const txHash = await withRetry("adjudicate submit", () =>
     gl.writeContract({
       address,
       functionName: "adjudicate",
-      args: [requestId, condition, JSON.stringify(evidence)],
+      args: [requestId, condition, evidenceJson],
       value: 0n,
     }),
   );
@@ -255,9 +271,5 @@ export async function adjudicate(
     }),
   );
 
-  return parseJson<Adjudication>(raw, {
-    met: false,
-    confidence: "low",
-    rationale: "no adjudication stored",
-  });
+  return adjudicationSchema.parse(parseBoundResult(raw, "adjudicate", requestId, condition, evidenceJson));
 }

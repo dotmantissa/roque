@@ -90,52 +90,18 @@ export function relayerAddress(): `0x${string}` {
  * costs one extra round trip and cannot leave a permanent gap.
  */
 let pending: Promise<unknown> = Promise.resolve();
-let nextNonce: number | null = null;
-
-/** The nonce to use, reading through to the chain only when we have lost track. */
-async function claimNonce(address: `0x${string}`): Promise<number> {
-  const onChain = await publicClient().getTransactionCount({ address, blockTag: "pending" });
-  if (nextNonce === null || onChain > nextNonce) nextNonce = onChain;
-  return nextNonce++;
-}
-
-/**
- * Send one transaction from the relayer wallet, behind the queue. Returns the
- * hash; waiting for the receipt is the caller's business, because some of these
- * are a user standing in front of a spinner and some are a background sweep.
- */
-export async function sendRelayerTx(params: { to: `0x${string}`; data: Hex }): Promise<Hex> {
-  const run = async (): Promise<Hex> => {
-    const wallet = relayerWallet();
-    const account = wallet.account!;
-    try {
-      return await wallet.sendTransaction({
-        account,
-        chain: wallet.chain,
-        to: params.to,
-        data: params.data,
-        nonce: await claimNonce(account.address),
-      });
-    } catch (err) {
-      // Could be a rejected send, could be a lost response on one that landed.
-      // Either way our count is no longer trustworthy, so give it up.
-      nextNonce = null;
-      throw err;
-    }
-  };
-  // Chained on both settle paths so one failure cannot stall the queue, and the
-  // stored link never rejects, so nothing turns into an unhandled rejection.
-  const queued = pending.then(run, run);
-  pending = queued.then(
-    () => undefined,
-    () => undefined,
-  );
+export async function sendRelayerTx(params: {to: `0x${string}`;data: Hex;operationId?:string}):Promise<Hex> {
+  const run=async()=>{const {durableSend}=await import("./sender.js");return durableSend(params);};
+  const queued=pending.then(run,run);
+  pending=queued.then(()=>undefined,()=>undefined);
   return queued;
 }
 
 /** Wait for a transaction and throw a readable error if the chain refused it. */
+export class SubmissionPendingError extends Error {constructor(public hash:Hex){super("Transaction outcome is pending; check status before retrying.");}}
+
 export async function confirmTx(hash: Hex, what: string): Promise<void> {
-  const receipt = await publicClient().waitForTransactionReceipt({ hash, timeout: 120_000 });
+  const receipt = await publicClient().waitForTransactionReceipt({ hash, timeout: 120_000, confirmations:3 }).catch(()=>{throw new SubmissionPendingError(hash);});
   if (receipt.status !== "success") {
     throw new Error(`${what} was rejected on-chain (${hash}).`);
   }

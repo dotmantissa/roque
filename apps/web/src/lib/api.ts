@@ -81,7 +81,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(
       res.status >= 500
-        ? `The server could not finish that (${res.status}). Nothing was changed.`
+        ? `The server could not finish that (${res.status}). Check transaction status before retrying.`
         : "Something went sideways. Try again.",
     );
   }
@@ -176,7 +176,7 @@ export const api = {
     wallet?: WalletClient,
   ) {
     let token: string | undefined;
-    if (mode === "autonomous") {
+    if (mode === "autonomous" || mode === "copilot") {
       if (!user) throw new Error("Connect a wallet first.");
       if (!wallet) throw new Error("Reconnect your wallet to authenticate.");
       token = await autonomousToken(wallet, user);
@@ -208,6 +208,7 @@ export const api = {
   }) {
     return request<PrepareResult>("/swap/prepare", {
       method: "POST",
+      headers: autonomousSession ? bearer(autonomousSession.token) : undefined,
       body: JSON.stringify(input),
     });
   },
@@ -215,6 +216,7 @@ export const api = {
   confirmSwap(id: string, txHash: string) {
     return request<{ ok: true }>("/swap/confirm", {
       method: "POST",
+      headers: autonomousSession ? bearer(autonomousSession.token) : undefined,
       body: JSON.stringify({ id, txHash }),
     });
   },
@@ -261,7 +263,7 @@ export const api = {
   },
 
   activity(user: string) {
-    return request<ActivityResult>(`/activity/${user}`);
+    return request<ActivityResult>(`/activity/${user}`, { headers: autonomousSession && autonomousSession.owner.toLowerCase()===user.toLowerCase() ? bearer(autonomousSession.token) : undefined });
   },
 
   orders(user: string) {

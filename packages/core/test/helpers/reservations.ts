@@ -88,6 +88,7 @@ const idFor = (kind: string, sourceId: string, stepIndex: number) =>
 
 export function reservationStore(): ReservationStore {
   const rows: ReservationRow[] = [];
+  const batches = new Map<string,{id:string;source:string;sourceId:string;payload:unknown;status:string}>();
   const locks = new Map<string, Lock>();
 
   const lockedOf = (user: string, symbol: string): bigint => {
@@ -252,6 +253,10 @@ export function reservationStore(): ReservationStore {
     },
 
     handle: (sql, params) => {
+      if(sql.startsWith("INSERT INTO reservation_batches")) {batches.set(String(params[0]),{id:String(params[0]),source:String(params[1]),sourceId:String(params[2]),payload:JSON.parse(String(params[3])),status:"pending"});return [];}
+      if(sql.startsWith("UPDATE reservation_batches")) {const batch=batches.get(String(params[0]));if(batch)batch.status="held";return [];}
+      if(sql.startsWith("SELECT id,payload FROM reservation_batches")) return [...batches.values()].filter(b=>b.source===params[0]&&b.sourceId===params[1]).slice(-1);
+
       const t = sql.replace(/\s+/gu, " ").trim();
 
       if (t.startsWith("INSERT INTO vault_reservations")) {

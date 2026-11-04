@@ -468,12 +468,12 @@ describe("what the vault is actually on the hook for", () => {
   // The pure half of the funding gate, asserted directly. It used to be
   // inferred from how many balance reads the gate made, which stopped meaning
   // anything once those reads were batched into one multicall.
-  it("skips a leg whose input an earlier leg produces", () => {
+  it("requires upfront funds for an absolute downstream spend", () => {
     const needs = vaultFundingNeeds([
       { tokenIn: "rUSDC", tokenOut: "rWETH", amount: "100", where: "Step 1" },
       { tokenIn: "rWETH", tokenOut: "rUSDC", amount: "1", where: "Step 2" },
     ]);
-    expect(needs.map((n) => n.symbol)).toEqual(["rUSDC"]);
+    expect(needs.map((n) => n.symbol)).toEqual(["rUSDC", "rWETH"]);
     expect(needs[0]!.raw).toBe(USDC(100));
   });
 

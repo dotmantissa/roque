@@ -63,6 +63,8 @@ export async function feedUsd(feed: `0x${string}`): Promise<FeedPrice> {
   const usd = Number(answer) / 10 ** Number(decimals);
   const now = Math.floor(Date.now() / 1000);
 
+  if (answer <= 0n || Number(decimals) > 18 || updatedAt <= 0 || updatedAt > now || now - updatedAt > 3600 || !Number.isFinite(usd))
+    throw new Error("Price feed is invalid or stale.");
   return { usd, updatedAt, ageSeconds: Math.max(0, now - updatedAt) };
 }
 
@@ -99,7 +101,7 @@ export async function allTokenUsd(): Promise<Record<string, number>> {
         const { usd } = await feedUsd(t.feed);
         return [t.symbol, usd] as const;
       } catch {
-        return [t.symbol, Number(t.initialPrice8) / 1e8] as const;
+        throw new Error(`Fresh price unavailable for ${t.symbol}.`);
       }
     }),
   );

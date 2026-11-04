@@ -7,6 +7,8 @@
  * throws an ApiError the transport layer turns into a status code.
  */
 
+import { admit } from "./admission.js";
+import { decimal, rawAmount } from "./validation.js";
 import { z } from "zod";
 import { formatUnits } from "viem";
 import { tokenList, tokenSymbols, addresses } from "@roque/shared";
@@ -72,6 +74,7 @@ import {
   authenticatedOwner,
   completeWalletChallenge,
   issueWalletChallenge,
+  revokeSession,
 } from "./auth.js";
 
 /** An error carrying the HTTP status the transport should answer with. */
@@ -162,11 +165,9 @@ const interpretSchema = z.object({
 
 export async function handleInterpret(body: unknown, sessionToken?: string) {
   const input = parse(interpretSchema, body);
-  if (input.mode === "autonomous") {
-    const owner = await requireAutonomousOwner(sessionToken, input.user);
-    return interpretCommand({ user: owner, mode: input.mode, command: input.command });
-  }
-  return interpretCommand({ user: input.user, mode: input.mode, command: input.command });
+  const owner = await requireAutonomousOwner(sessionToken, input.user);
+  await admit(`interpret:${owner}`, 10);
+  return interpretCommand({ user: owner, mode: input.mode, command: input.command });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -176,10 +177,7 @@ export async function handleInterpret(body: unknown, sessionToken?: string) {
 const quoteSchema = z.object({
   from: symbol,
   to: symbol,
-  amount: z
-    .string()
-    .min(1)
-    .refine((s) => Number(s) > 0, "Amount must be a positive number."),
+  amount: decimal.refine((s) => Number(s) > 0, "Amount must be positive."),
 });
 
 export async function handleQuote(body: unknown) {
@@ -231,16 +229,18 @@ const prepareSchema = z.object({
   id: z.string().optional(),
   from: symbol,
   to: symbol,
-  amount: z.string().min(1),
+  amount: decimal,
   slippageBps: z.number().int().min(0).max(5000).default(100),
 });
 
-export async function handlePrepareSwap(body: unknown) {
+export async function handlePrepareSwap(body: unknown, sessionToken?: string) {
   const input = parse(prepareSchema, body);
   if (input.from === input.to) {
     throw new ApiError(400, "Pick two different tokens to trade between.");
   }
+  const owner = await requireAutonomousOwner(sessionToken);
   const prepared = await prepareCopilotSwap({
+    user: owner,
     id: input.id,
     fromSymbol: input.from,
     toSymbol: input.to,
@@ -264,9 +264,10 @@ const confirmSchema = z.object({
   txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/u, "That is not a transaction hash."),
 });
 
-export async function handleConfirmSwap(body: unknown) {
+export async function handleConfirmSwap(body: unknown, sessionToken?: string) {
   const input = parse(confirmSchema, body);
-  await attachTxHash(input.id, input.txHash);
+  const owner = await requireAutonomousOwner(sessionToken);
+  await attachTxHash(input.id, input.txHash, owner);
   return { ok: true };
 }
 
@@ -277,10 +278,10 @@ export async function handleConfirmSwap(body: unknown) {
 const grantSchema = z.object({
   user: address,
   agentSigner: address,
-  maxPerTradeUsd: z.string().min(1),
-  maxDailyUsd: z.string().min(1),
-  maxSlippageBps: z.string().min(1),
-  validUntil: z.string().min(1),
+  maxPerTradeUsd: rawAmount,
+  maxDailyUsd: rawAmount,
+  maxSlippageBps: rawAmount,
+  validUntil: rawAmount,
   signature,
 });
 
@@ -381,11 +382,14 @@ export async function handleVault(userRaw: string) {
   return { balances, raw, heldRaw, availableRaw, claims };
 }
 
-export async function handleActivity(userRaw: string, limit = 25) {
+export async function handleActivity(userRaw: string, limit = 25, sessionToken?: string) {
   const user = parse(address, userRaw);
+  const bounded = parse(z.number().int().min(1).max(100), limit);
+  const owner = await authenticatedOwner(sessionToken);
+  if (owner && owner.toLowerCase() !== user.toLowerCase()) throw new ApiError(403, "This session belongs to another wallet.");
   const [intents, trades] = await Promise.all([
-    intentHistory(user, limit),
-    tradeHistory(user, limit),
+    owner ? intentHistory(user, bounded) : Promise.resolve([]),
+    tradeHistory(user, bounded),
   ]);
   return { intents, trades };
 }
@@ -784,4 +788,10 @@ export async function handleJudgmentTick() {
     proposalTick().catch((err) => ({ error: (err as Error).message })),
   ]);
   return { events, playbooks, proposals };
+}
+
+export async function handleRevokeSession(sessionToken?: string) {
+  await requireAutonomousOwner(sessionToken);
+  await revokeSession(sessionToken!);
+  return {ok:true};
 }

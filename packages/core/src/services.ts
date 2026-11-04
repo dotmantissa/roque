@@ -12,6 +12,7 @@
  * point does a language model's opinion reach for funds directly.
  */
 
+import { verifyWalletTrade, type WalletTrade } from "./settlement.js";
 import { randomUUID } from "node:crypto";
 import { parseUnits, formatUnits } from "viem";
 import {
@@ -258,6 +259,7 @@ export async function preflightVaultSwap(params: {
 export async function executeVaultSwap(
   user: `0x${string}`,
   plan: VaultSwapPlan,
+  operationId?:string,
 ): Promise<`0x${string}`> {
   const intent: SwapIntent = {
     user,
@@ -271,7 +273,7 @@ export async function executeVaultSwap(
     nonce: await freshNonce(user),
     deadline: BigInt(Math.floor(Date.now() / 1000) + INTENT_TTL_SECONDS),
   };
-  return submitSwap(intent, await signSwapIntent(intent));
+  return submitSwap(intent, await signSwapIntent(intent),operationId);
 }
 
 /**
@@ -397,6 +399,7 @@ async function buildContext(): Promise<Record<string, unknown>> {
  */
 export async function prepareCopilotSwap(params: {
   id?: string;
+  user: `0x${string}`;
   fromSymbol: string;
   toSymbol: string;
   amount: string;
@@ -411,6 +414,13 @@ export async function prepareCopilotSwap(params: {
 }> {
   const quoted = await quoteSwap(params.fromSymbol, params.toSymbol, params.amount);
   const minOut = minOutForSlippage(quoted.amountOutRaw, params.slippageBps);
+  if (params.id) {
+    const stored = await q(`UPDATE intents SET prepared_plan=$3::jsonb, updated_at=now()
+      WHERE id=$1 AND LOWER(user_address)=LOWER($2) AND mode='copilot' AND status='ready' RETURNING id`,
+      [params.id, params.user, JSON.stringify({tokenIn:quoted.tokenIn.address,tokenOut:quoted.tokenOut.address,
+       amountInRaw:quoted.amountInRaw.toString(),minAmountOutRaw:minOut.toString(),recipient:params.user})]);
+    if(stored.length!==1) throw new Error("Intent is inaccessible or no longer ready.");
+  }
   return {
     router: addresses.router,
     tokenIn: quoted.tokenIn,
@@ -501,7 +511,7 @@ export async function executeAutonomous(params: {
       deadline: BigInt(now + INTENT_TTL_SECONDS),
     };
     const sig = await signLimitIntent(intent);
-    const txHash = await submitLimitOrder(intent, sig);
+    const txHash = await submitLimitOrder(intent, sig,`intent:${params.id}`);
     await setStatus(params.id, "submitted", { tx_hash: txHash });
     return { txHash, kind: "limit" };
   }
@@ -517,7 +527,7 @@ export async function executeAutonomous(params: {
     deadline: BigInt(now + INTENT_TTL_SECONDS),
   };
   const sig = await signSwapIntent(intent);
-  const txHash = await submitSwap(intent, sig);
+  const txHash = await submitSwap(intent, sig,`intent:${params.id}`);
   await setStatus(params.id, "submitted", { tx_hash: txHash });
   return { txHash, kind: "swap" };
 }
@@ -536,8 +546,17 @@ export async function setStatus(
 }
 
 /** Record that a copilot transaction the user sent has been broadcast. */
-export async function attachTxHash(id: string, txHash: string): Promise<void> {
-  await setStatus(id, "submitted", { tx_hash: txHash });
+export async function attachTxHash(id: string, txHash: string, owner: `0x${string}`): Promise<void> {
+  const rows=await q<{prepared_plan: WalletTrade;tx_hash:string|null;status:string}>(
+    "SELECT prepared_plan,tx_hash,status FROM intents WHERE id=$1 AND LOWER(user_address)=LOWER($2) AND mode='copilot'",[id,owner]);
+  const record=rows[0];
+  if(!record?.prepared_plan || !["ready","submitted","confirmed"].includes(record.status) || (record.tx_hash && record.tx_hash!==txHash))
+    throw new Error("Intent is inaccessible, unprepared or already reported.");
+  const settlement = await verifyWalletTrade(txHash as `0x${string}`,owner,record.prepared_plan);
+  const saved=await q(`UPDATE intents SET tx_hash=$3,status=$4,updated_at=now()
+    WHERE id=$1 AND LOWER(user_address)=LOWER($2) AND mode='copilot' AND status IN ('ready','submitted','confirmed')
+      AND (tx_hash IS NULL OR tx_hash=$3) RETURNING id`,[id,owner,txHash,settlement.status === "confirmed" ? "confirmed" : "submitted"]);
+  if(saved.length!==1) throw new Error("Conflicting transaction report.");
 }
 
 /** The recent intent history for a user, newest first. */

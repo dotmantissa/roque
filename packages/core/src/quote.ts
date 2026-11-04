@@ -8,6 +8,7 @@
 
 import { formatUnits, parseUnits } from "viem";
 import { addresses, abis, requireToken, poolAddressFor, type TokenMeta } from "@roque/shared";
+import { decimal } from "./validation.js";
 import { publicClient } from "./chain.js";
 
 export interface Quote {
@@ -35,7 +36,10 @@ export async function quoteSwap(
 ): Promise<Quote> {
   const tokenIn = requireToken(fromSymbol);
   const tokenOut = requireToken(toSymbol);
+  decimal.parse(amountIn);
+  if ((amountIn.split(".")[1]?.length ?? 0) > tokenIn.decimals) throw new Error("Amount exceeds token precision.");
   const amountInRaw = parseUnits(amountIn, tokenIn.decimals);
+  if (amountInRaw <= 0n || amountInRaw >= 2n ** 256n) throw new Error("Invalid trade amount.");
 
   const amountOutRaw = (await publicClient().readContract({
     address: addresses.router,

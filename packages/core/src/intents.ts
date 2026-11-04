@@ -164,27 +164,27 @@ export async function signReleaseIntent(intent: ReleaseIntent): Promise<Hex> {
  * send with the relayer wallet, which pays the gas; the intent still moves only
  * the user's vaulted funds and only within their capability.
  */
-export async function submitSwap(intent: SwapIntent, signature: Hex): Promise<Hex> {
+export async function submitSwap(intent: SwapIntent, signature: Hex, operationId?:string): Promise<Hex> {
   const data = encodeFunctionData({
     abi: abis.agentExecutor,
     functionName: "executeSwap",
     args: [intent, signature],
   });
-  return sendFromRelayer(data);
+  return sendFromRelayer(data,operationId);
 }
 
 /** Submit a signed limit order to Sepolia and return the transaction hash. */
-export async function submitLimitOrder(intent: LimitIntent, signature: Hex): Promise<Hex> {
+export async function submitLimitOrder(intent: LimitIntent, signature: Hex, operationId?:string): Promise<Hex> {
   const data = encodeFunctionData({
     abi: abis.agentExecutor,
     functionName: "createLimitOrder",
     args: [intent, signature],
   });
-  return sendFromRelayer(data);
+  return sendFromRelayer(data,operationId);
 }
 
-async function sendFromRelayer(data: Hex): Promise<Hex> {
-  return sendRelayerTx({ to: addresses.agentExecutor, data });
+async function sendFromRelayer(data: Hex, operationId?:string): Promise<Hex> {
+  return sendRelayerTx({ to: addresses.agentExecutor, data, operationId });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ async function sendFromRelayer(data: Hex): Promise<Hex> {
  * Every leg goes in one transaction, all or nothing, so a playbook is never
  * half funded.
  */
-export async function lockCommitments(intents: CommitIntent[]): Promise<Hex | null> {
+export async function lockCommitments(intents: CommitIntent[], operationId?:string): Promise<Hex | null> {
   if (intents.length === 0) return null;
   const signatures = await Promise.all(intents.map(signCommitIntent));
   const data =
@@ -220,7 +220,7 @@ export async function lockCommitments(intents: CommitIntent[]): Promise<Hex | nu
           functionName: "lockForCommitments",
           args: [intents, signatures],
         });
-  const hash = await sendFromRelayer(data);
+  const hash = await sendFromRelayer(data,operationId);
   await confirmTx(hash, "Holding the vault money for this order");
   return hash;
 }

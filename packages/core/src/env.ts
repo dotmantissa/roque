@@ -33,7 +33,7 @@ function optional(name: string, fallback = ""): string {
  */
 function normalizeKey(raw: string): `0x${string}` {
   const hex = raw.startsWith("0x") ? raw.slice(2) : raw;
-  if (hex.length !== 64) {
+  if (!/^[a-fA-F0-9]{64}$/u.test(hex)) {
     throw new Error("A private key must be 32 bytes of hex, with or without a 0x prefix.");
   }
   return `0x${hex}` as `0x${string}`;
@@ -64,25 +64,48 @@ export function agentSignerKey(): `0x${string}` {
  * secrets, which is the point: it should be impossible to leak these by import.
  */
 export function serverEnv() {
+  const production = process.env.NODE_ENV === "production";
+  const latchRpcUrl = optional("LATCH_RPC_URL");
+  const latchToken = optional("LATCH_TOKEN");
+  const latchRequired = production || optional("LATCH_REQUIRED") === "true";
+  if (Boolean(latchRpcUrl) !== Boolean(latchToken) || (latchRequired && !latchRpcUrl))
+    throw new Error("Complete Latch configuration is required for relayer writes.");
+  if (latchRpcUrl && new URL(latchRpcUrl).protocol !== "https:")
+    throw new Error("Latch transport must use HTTPS.");
+  const relayerKey = normalizeKey(production ? required("RELAYER_PRIVATE_KEY") : optional("RELAYER_PRIVATE_KEY") || required("DEPLOYER_PRIVATE_KEY"));
+  if (production && (relayerKey === agentSignerKey() || relayerKey === optional("DEPLOYER_PRIVATE_KEY")))
+    throw new Error("Production requires a dedicated relayer key.");
+  const cronSecret = production ? required("CRON_SECRET") : optional("CRON_SECRET", "roque-local-cron");
+  if (production && (cronSecret.length < 32 || cronSecret === "roque-local-cron"))
+    throw new Error("Production cron credentials must contain at least 32 characters.");
   return {
     ...publicEnv,
     agentSignerKey: agentSignerKey(),
     // The keeper and the grant relayer both need to pay gas on Sepolia. In this
     // deployment the deployer wallet doubles as that gas payer; a production
     // setup would use a dedicated, minimally funded hot wallet.
-    relayerKey: normalizeKey(optional("RELAYER_PRIVATE_KEY") || required("DEPLOYER_PRIVATE_KEY")),
+    relayerKey,
     // When both are present the relayer's Sepolia writes egress through a Latch
     // proxy instead of straight to the RPC: Latch injects the real provider key,
     // rate limits the channel and keeps a signed audit trail. Leave them unset
     // and the relayer talks to SEPOLIA_RPC_URL directly, exactly as before.
-    latchRpcUrl: optional("LATCH_RPC_URL"),
-    latchToken: optional("LATCH_TOKEN"),
-    databaseUrl: required("DATABASE_URL"),
+    latchRpcUrl,
+    latchToken,
+    latchRequired,
+    databaseUrl: databaseUrl(),
     // A shared secret guarding the cron routes so only Vercel's scheduler, not
     // the open internet, can nudge the keeper and indexer.
-    cronSecret: optional("CRON_SECRET", "roque-local-cron"),
+    cronSecret,
     port: Number(optional("RELAYER_PORT", "8787")),
   };
+}
+
+export function databaseUrl(): string { return required("DATABASE_URL"); }
+
+export function authOrigin(): string {
+  const origin = new URL(optional("AUTH_ORIGIN", process.env.NODE_ENV === "production" ? required("AUTH_ORIGIN") : "http://localhost:3000"));
+  if (process.env.NODE_ENV === "production" && origin.protocol !== "https:") throw new Error("AUTH_ORIGIN must use HTTPS.");
+  return origin.origin;
 }
 
 export type ServerEnv = ReturnType<typeof serverEnv>;

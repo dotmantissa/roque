@@ -1,140 +1,40 @@
-/**
- * One wallet, several things wanting to send at once.
- *
- * Every Sepolia write Roque makes leaves from the relayer address: the keeper
- * filling a triggered limit order, the judgment loop filling an event order, a
- * playbook advancing a rung, somebody arming an order and locking the money
- * behind it. Fired off in parallel they each asked the node for the next nonce,
- * all got the same answer, and all but one came back "replacement transaction
- * underpriced". Nothing was lost but the work, and the failure was unreadable:
- * a fill that reverts on a nonce collision looks exactly like a fill the
- * contract refused.
- *
- * So the interesting assertion here is not that sends succeed. It is that two
- * sends never carry the same nonce, however many go out at once.
- */
-
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const state = vi.hoisted(() => ({
-  sendTransaction: vi.fn(),
-  getTransactionCount: vi.fn(),
-  waitForTransactionReceipt: vi.fn(),
-}));
-
-vi.mock("viem", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    createWalletClient: () => ({
-      account: { address: "0x1111111111111111111111111111111111111111" },
-      chain: { id: 11155111 },
-      sendTransaction: state.sendTransaction,
-    }),
-    createPublicClient: () => ({
-      getTransactionCount: state.getTransactionCount,
-      waitForTransactionReceipt: state.waitForTransactionReceipt,
-    }),
-  };
+import {PGlite} from "@electric-sql/pglite";
+import {beforeAll,afterAll,beforeEach,it,expect,vi} from "vitest";
+import {privateKeyToAccount} from "viem/accounts";
+import {keccak256,parseTransaction} from "viem";
+const s=vi.hoisted(()=>({db:null as unknown as PGlite,sendRaw:vi.fn(),prepare:vi.fn(),getCount:vi.fn(),receipt:vi.fn(),block:vi.fn(),height:vi.fn()}));
+vi.mock("../src/db/index.js",async orig=>({...await orig<typeof import("../src/db/index.js")>(),q:async(t:string,p:unknown[]=[])=> (await s.db.query(t,p)).rows}));
+const account=privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+vi.mock("../src/chain.js",()=>({relayerWallet:()=>({account,chain:{id:11155111},prepareTransactionRequest:s.prepare,signTransaction:account.signTransaction,sendRawTransaction:s.sendRaw}),publicClient:()=>({getTransactionCount:s.getCount,getTransactionReceipt:s.receipt,getBlock:s.block,getBlockNumber:s.height})}));
+const {migration0002}=await import("../src/db/migrations/0002-public-api.js");
+const {SCHEMA_SQL}=await import("../src/db/index.js");
+const {durableSend,reconcileRelayerAttempts}=await import("../src/sender.js");
+const to="0x2222222222222222222222222222222222222222" as const,data="0xdeadbeef" as const;
+beforeAll(async()=>{s.db=new PGlite();await s.db.exec(SCHEMA_SQL+"\n"+migration0002);},30000);
+afterAll(()=>s.db.close());
+beforeEach(async()=>{
+ await s.db.exec("TRUNCATE execution_attempts,worker_leases,relayer_senders");vi.clearAllMocks();s.getCount.mockResolvedValue(7);
+ s.prepare.mockImplementation(async(p)=>({...p,account:undefined,chain:undefined,chainId:11155111,type:"eip1559",gas:100000n,maxFeePerGas:10n,maxPriorityFeePerGas:1n}));
+ s.sendRaw.mockImplementation(async({serializedTransaction})=>keccak256(serializedTransaction));
 });
-
-process.env.AGENT_SIGNER_PRIVATE_KEY =
-  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-process.env.DEPLOYER_PRIVATE_KEY =
-  "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba";
-process.env.DATABASE_URL = "postgresql://ci:ci@127.0.0.1:5432/roque";
-
-const { sendRelayerTx, confirmTx } = await import("../src/chain.js");
-
-const TO = "0x2222222222222222222222222222222222222222" as const;
-const DATA = "0xdeadbeef" as const;
-
-/**
- * The nonce each call was sent with, in the order the wallet saw them.
- *
- * The counter is module state, deliberately: it is the thing that survives
- * between sends. So these assert the relationship between calls rather than
- * absolute values, which would only be describing the order the file runs in.
- */
-const noncesUsed = (): number[] =>
-  state.sendTransaction.mock.calls.map((c) => (c[0] as { nonce: number }).nonce);
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  // The node reports the same pending count until a transaction propagates,
-  // which is exactly the lag that used to produce the collision.
-  state.getTransactionCount.mockResolvedValue(7);
-  state.sendTransaction.mockImplementation(async () => "0xhash");
+it("persists signed bytes and allocates consecutive nonces across restarted senders",async()=>{
+ await durableSend({to,data,operationId:"one"});await durableSend({to,data,operationId:"two"});
+ const rows=(await s.db.query<{raw_tx:`0x${string}`;nonce:number}>("SELECT raw_tx,nonce FROM execution_attempts ORDER BY nonce")).rows;
+ expect(rows.map(r=>parseTransaction(r.raw_tx).nonce)).toEqual([7,8]);expect(s.sendRaw).toHaveBeenCalledTimes(2);
 });
-
-describe("sendRelayerTx", () => {
-  it("gives every concurrent send its own nonce", async () => {
-    await Promise.all(
-      Array.from({ length: 5 }, () => sendRelayerTx({ to: TO, data: DATA })),
-    );
-    const used = noncesUsed();
-    expect(new Set(used).size).toBe(5);
-    // Consecutive, which is what a node will actually accept: a gap stalls the
-    // queue behind it until the missing one arrives.
-    expect(used).toEqual([used[0], used[0] + 1, used[0] + 2, used[0] + 3, used[0] + 4]);
-  });
-
-  it("sends one at a time rather than all at once", async () => {
-    let inFlight = 0;
-    let peak = 0;
-    state.sendTransaction.mockImplementation(async () => {
-      inFlight += 1;
-      peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 5));
-      inFlight -= 1;
-      return "0xhash";
-    });
-
-    await Promise.all(
-      Array.from({ length: 4 }, () => sendRelayerTx({ to: TO, data: DATA })),
-    );
-    expect(peak).toBe(1);
-  });
-
-  it("keeps going after one send fails, and re-reads the chain", async () => {
-    // A failure means our local count is no longer trustworthy: the send may
-    // have landed and we lost the answer. Dropping it costs one extra round
-    // trip and cannot leave a permanent gap, which is the safe direction.
-    state.sendTransaction
-      .mockImplementationOnce(async () => {
-        throw new Error("rpc fell over");
-      })
-      .mockImplementation(async () => "0xhash");
-    state.getTransactionCount.mockResolvedValueOnce(7).mockResolvedValue(9);
-
-    await expect(sendRelayerTx({ to: TO, data: DATA })).rejects.toThrow("rpc fell over");
-    await sendRelayerTx({ to: TO, data: DATA });
-    // The second one took the chain's answer rather than carrying on from a
-    // count the failure made meaningless.
-    expect(noncesUsed()[1]).toBe(9);
-  });
-
-  it("never lets a stale local count fall behind the chain", async () => {
-    // Somebody else spent from the same key, or a restart lost our place.
-    await sendRelayerTx({ to: TO, data: DATA });
-    state.getTransactionCount.mockResolvedValue(40);
-    await sendRelayerTx({ to: TO, data: DATA });
-    expect(noncesUsed()[1]).toBe(40);
-  });
+it("retains lost responses and retries identical bytes without another business action",async()=>{
+ s.sendRaw.mockRejectedValueOnce(new Error("response lost"));const hash=await durableSend({to,data,operationId:"lost"});
+ const row=(await s.db.query<{status:string;raw_tx:string}>("SELECT status,raw_tx FROM execution_attempts WHERE id='lost'")).rows[0];expect(row.status).toBe("submission_unknown");
+ expect(await durableSend({to,data,operationId:"lost"})).toBe(hash);expect(s.prepare).toHaveBeenCalledTimes(1);
+ s.receipt.mockRejectedValue(new Error("not found"));await reconcileRelayerAttempts();
+ expect(s.sendRaw.mock.calls[1][0].serializedTransaction).toBe(row.raw_tx);
 });
-
-describe("confirmTx", () => {
-  it("is quiet when the chain accepted it", async () => {
-    state.waitForTransactionReceipt.mockResolvedValue({ status: "success" });
-    await expect(confirmTx("0xhash", "Holding the money")).resolves.toBeUndefined();
-  });
-
-  it("says what failed when the chain refused it", async () => {
-    // This is what turns a reverted hold into a sentence at arming time rather
-    // than an order that looks armed and can never fill.
-    state.waitForTransactionReceipt.mockResolvedValue({ status: "reverted" });
-    await expect(confirmTx("0xhash", "Holding the money")).rejects.toThrow(
-      "Holding the money was rejected on-chain",
-    );
-  });
+it("fences overlapping processes and recovers unsigned nonce holes",async()=>{
+ s.prepare.mockRejectedValueOnce(new Error("prepare interrupted"));
+ await expect(durableSend({to,data,operationId:"first"})).rejects.toThrow("interrupted");
+ await durableSend({to,data,operationId:"second"});
+ expect(s.sendRaw.mock.calls.map(c=>parseTransaction(c[0].serializedTransaction).nonce)).toEqual([7,8]);
+ const overlapping=await Promise.allSettled([durableSend({to,data,operationId:"third"}),durableSend({to,data,operationId:"fourth"})]);
+ expect(overlapping.filter(r=>r.status==="fulfilled")).toHaveLength(1);
+ expect((await s.db.query("SELECT nonce FROM execution_attempts GROUP BY nonce HAVING count(*)>1")).rows).toHaveLength(0);
 });

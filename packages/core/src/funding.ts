@@ -86,7 +86,7 @@ export function vaultFundingNeeds(legs: FundingLeg[]): FundingNeed[] {
     const tokenIn = requireToken(leg.tokenIn);
     const tokenOut = requireToken(leg.tokenOut);
 
-    if (!produced.has(tokenIn.symbol)) {
+    if (!produced.has(tokenIn.symbol) || !leg.amountIsPercent) {
       let need = needs.get(tokenIn.symbol);
       if (!need) {
         need = { symbol: tokenIn.symbol, raw: 0n, needsSome: false, where: [] };

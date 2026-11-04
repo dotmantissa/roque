@@ -18,6 +18,11 @@
  * trade the person watched themselves press.
  */
 
+import {formatUnits,parseUnits} from "viem";
+import {vaultSettlement} from "./settlement.js";
+import {SubmissionPendingError} from "./chain.js";
+import {getCommitment} from "./intents.js";
+import {NO_COMMITMENT} from "./intents.js";
 import { randomUUID } from "node:crypto";
 import { tokenBySymbol } from "@roque/shared";
 import { q } from "./db/index.js";
@@ -26,7 +31,7 @@ import { adjudicate } from "./genlayer.js";
 import { preflightVaultSwap, executeVaultSwap } from "./services.js";
 import { gatherEvidence, localScreen, EVENT_CHECK_INTERVAL_MS } from "./events.js";
 import { assertVaultFunds } from "./funding.js";
-import { commitmentIdFor, reserve, release } from "./reservations.js";
+import { commitmentIdFor, reserve, recoverReservation, release } from "./reservations.js";
 
 /**
  * How long a rung's hold should last. Every commitment carries an end, because
@@ -69,6 +74,8 @@ export type StepStatus = "waiting" | "firing" | "done" | "failed" | "skipped";
 
 export interface PlaybookStep {
   id: string;
+  funding?: {source:"vault"|"previous_output";stepIndex?:number};
+  amountOutRaw?:string;
   label: string;
   trigger: PlaybookTrigger;
   action: PlaybookAction;
@@ -84,7 +91,7 @@ export interface PlaybookStep {
   verdict?: { met: boolean; confidence: string; rationale: string } | null;
 }
 
-export type PlaybookStatus = "draft" | "armed" | "completed" | "cancelled" | "failed";
+export type PlaybookStatus = "draft" | "arming" | "armed" | "completed" | "cancelled" | "failed";
 
 export interface Playbook {
   id: string;
@@ -156,10 +163,11 @@ export function normaliseStep(raw: unknown, index: number): PlaybookStep {
   if (tokenIn.symbol === tokenOut.symbol) throw new Error(`${where} trades a token for itself.`);
 
   const amount = String(action.amount ?? "").trim();
-  if (!/^\d+(\.\d+)?$/u.test(amount) || Number(amount) <= 0) {
+  if (amount.length>78 || !/^\d+(\.\d+)?$/u.test(amount) || Number(amount) <= 0) {
     throw new Error(`${where} needs a positive amount.`);
   }
-  const amountIsPercent = Boolean(action.amountIsPercent);
+  if(action.amountIsPercent!==undefined && typeof action.amountIsPercent!=="boolean") throw new Error(`${where} needs an exact boolean percentage flag.`);
+  const amountIsPercent = action.amountIsPercent === true;
   if (amountIsPercent && Number(amount) > 100) {
     throw new Error(`${where} asks for more than 100 percent of the balance.`);
   }
@@ -464,8 +472,10 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
   const produced = new Set<string>();
   const claims: Parameters<typeof reserve>[0] = [];
   const holdUntil = holdWindow(steps);
+  const outputShares = new Map<number,bigint>();
   for (const [index, step] of steps.entries()) {
-    if (!produced.has(step.action.tokenIn)) {
+    if (!produced.has(step.action.tokenIn) || !step.action.amountIsPercent) {
+      step.funding={source:"vault"};
       claims.push({
         user: row.user_address,
         token: step.action.tokenIn,
@@ -477,12 +487,19 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
         holdUntil,
       });
     }
+    if(!step.funding) step.funding={source:"previous_output",stepIndex:steps.slice(0,index).map(s=>s.action.tokenOut).lastIndexOf(step.action.tokenIn)};
+    if(step.funding.source==="previous_output") {
+      const upstream=step.funding.stepIndex!;
+      const total=(outputShares.get(upstream)??0n)+parseUnits(step.action.amount,4);
+      if(total>1000000n) throw new Error("Downstream steps promise more than 100 percent of upstream output.");
+      outputShares.set(upstream,total);
+    }
     produced.add(step.action.tokenOut);
   }
 
   steps[0].armedAt = new Date().toISOString();
   const armed = await q<PlaybookRow>(
-    `UPDATE playbooks SET status='armed', steps=$2::jsonb, step_cursor=0, error=NULL,
+    `UPDATE playbooks SET status='arming', steps=$2::jsonb, step_cursor=0, error=NULL,
         last_checked_at=NULL, updated_at=now()
       WHERE id=$1 AND status='draft' RETURNING *`,
     [id, JSON.stringify(steps)],
@@ -493,6 +510,7 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
     try {
       await reserve(claims);
     } catch (err) {
+      if(err instanceof SubmissionPendingError) return toPlaybook(armed[0]);
       // Same shape as an event order, deliberately. This path already released,
       // but it did so after the row write and without guarding the release
       // itself, so a release that threw replaced the reason the person needed
@@ -505,7 +523,7 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
       }
       await q(
         `UPDATE playbooks SET status='draft', error=$2, updated_at=now()
-          WHERE id=$1 AND status='armed'`,
+          WHERE id=$1 AND status='arming'`,
         [
           id,
           `could not hold the vault money: ${(err as Error).message}` +
@@ -516,8 +534,9 @@ export async function armPlaybook(id: string, user: string): Promise<Playbook> {
     }
   }
 
+  await q("UPDATE playbooks SET status='armed',updated_at=now() WHERE id=$1 AND status='arming'",[id]);
   await log(id, 0, "armed", `${steps.length} step${steps.length === 1 ? "" : "s"} armed`);
-  return toPlaybook(armed[0]);
+  return toPlaybook({...armed[0],status:"armed"});
 }
 
 /** The same meta-question the standalone screen asks, kept in one wording. */
@@ -560,6 +579,7 @@ export async function advancePlaybook(id: string): Promise<Playbook> {
   const step = steps[cursor];
 
   if (!step) return complete(id, steps);
+  if (step.status !== "waiting") return toPlaybook(row);
   if (!dueForCheck(step, Date.now())) return toPlaybook(row);
 
   // Event steps need a verdict before the pure rule can decide.
@@ -590,7 +610,7 @@ export async function advancePlaybook(id: string): Promise<Playbook> {
   if (!ready) {
     await q(
       `UPDATE playbooks SET steps=$2::jsonb, last_checked_at=now(), updated_at=now()
-        WHERE id=$1 AND step_cursor=$3`,
+        WHERE id=$1 AND step_cursor=$3 AND status='armed' AND (steps->$3->>'status')='waiting'`,
       [id, JSON.stringify(steps), cursor],
     );
     return toPlaybook({ ...row, steps, last_checked_at: new Date().toISOString() });
@@ -606,24 +626,31 @@ export async function advancePlaybook(id: string): Promise<Playbook> {
   );
   if (claimed.length !== 1) return toPlaybook(row);
 
+  let submissionStarted = false;
   try {
     const plan = await preflightVaultSwap({
       user: row.user_address as `0x${string}`,
       tokenIn: tokenBySymbol(step.action.tokenIn)!,
       tokenOut: tokenBySymbol(step.action.tokenOut)!,
-      amount: step.action.amount,
-      amountIsPercent: step.action.amountIsPercent,
+      amount: step.funding?.source==="previous_output" ? priorOutputAmount(steps,step) : step.action.amount,
+      amountIsPercent: step.funding?.source==="previous_output" ? false : step.action.amountIsPercent,
       slippageBps: row.slippage_bps,
       // The rung spends the hold taken for it at arm time, and the hold ends in
       // the same transaction. A rung whose input an earlier rung produces took
       // no hold, so this resolves to a commitment that was never made and the
       // trade draws on free money instead, which is what the funding gate
       // already assumed when it skipped that leg.
-      commitmentId: commitmentIdFor("playbook", id, cursor),
+      commitmentId: step.funding?.source==="previous_output" ? NO_COMMITMENT : commitmentIdFor("playbook", id, cursor),
     });
-    const txHash = await executeVaultSwap(row.user_address as `0x${string}`, plan);
-    step.status = "done";
+    submissionStarted = true;
+    const txHash = await executeVaultSwap(row.user_address as `0x${string}`, plan,`playbook:${id}:${cursor}`);
     step.txHash = txHash;
+    await q(`UPDATE playbooks SET steps=$2::jsonb,updated_at=now() WHERE id=$1 AND step_cursor=$3 AND status='armed'`,[id,JSON.stringify(steps),cursor]);
+    const settlement=await vaultSettlement(`playbook:${id}:${cursor}`);
+    if(settlement.status==="pending") return toPlaybook({...row,steps});
+    if(settlement.status==="reverted") throw new Error("Transaction reverted.");
+    step.amountOutRaw=settlement.amountOutRaw;
+    step.status = "done";
     step.firedAt = new Date().toISOString();
     step.error = null;
     // This rung's promise was kept. Released one rung at a time so the rest of
@@ -631,6 +658,7 @@ export async function advancePlaybook(id: string): Promise<Playbook> {
     await release("playbook", id, "spent", cursor);
     await log(id, cursor, "filled", step.label, txHash);
   } catch (err) {
+    if (submissionStarted) return toPlaybook({...row,steps});
     step.status = "failed";
     step.error = (err as Error).message;
     await log(id, cursor, "failed", step.error);
@@ -792,28 +820,35 @@ const FIRING_REAP_MINUTES = 10;
  * a no-op and one it never reached should not stay locked.
  */
 async function reapStuckPlaybooks(result: PlaybookTickResult): Promise<void> {
-  const stuck = await q<{ id: string }>(
-    `UPDATE playbooks SET status='failed',
-        error='A step was interrupted mid-trade. Check your activity for whether it landed, then start a fresh plan.',
-        updated_at=now()
-      WHERE status='armed'
-        AND COALESCE(steps->step_cursor->>'status', '') = 'firing'
-        AND updated_at < now() - ($1 || ' minutes')::interval
-      RETURNING id`,
-    [String(FIRING_REAP_MINUTES)],
-  );
-  for (const { id } of stuck) {
-    try {
-      await release("playbook", id);
-      await log(id, 0, "failed", "interrupted mid-trade");
-    } catch (err) {
-      result.errors.push(`reap ${id}: ${(err as Error).message}`);
+  // Unknown submission is retained; reconciliation never starts a replacement business action.
+  const stuck=await q<PlaybookRow>(`SELECT * FROM playbooks WHERE status='armed' AND COALESCE(steps->step_cursor->>'status','')='firing' ORDER BY updated_at LIMIT 20`);
+  for(const row of stuck) {
+    const steps=row.steps.map(s=>({...s})),cursor=row.step_cursor,step=steps[cursor];
+    if(!step) continue;
+    const settlement=await vaultSettlement(`playbook:${row.id}:${cursor}`);
+    if(settlement.status==="pending") continue;
+    if(settlement.status==="reverted") {
+      await q("UPDATE playbooks SET status='failed',error='Transaction reverted',updated_at=now() WHERE id=$1 AND status='armed'",[row.id]);
+      await release("playbook",row.id);continue;
     }
+    step.status="done";step.txHash=settlement.txHash;step.amountOutRaw=settlement.amountOutRaw;step.firedAt=new Date().toISOString();
+    if(steps[cursor+1]) steps[cursor+1].armedAt=step.firedAt;
+    await q(`UPDATE playbooks SET steps=$2::jsonb,step_cursor=$3,updated_at=now() WHERE id=$1 AND step_cursor=$4 AND status='armed'`,[row.id,JSON.stringify(steps),cursor+1,cursor]);
+    await release("playbook",row.id,"spent",cursor);
+    if(!steps[cursor+1]) await complete(row.id,steps);
   }
+
 }
 
 export async function playbookTick(): Promise<PlaybookTickResult> {
   const result: PlaybookTickResult = { advanced: 0, filled: [], completed: [], errors: [] };
+  const arming=await q<PlaybookRow>("SELECT * FROM playbooks WHERE status='arming' AND updated_at<now()-interval '5 minutes' ORDER BY updated_at LIMIT 20");
+  for(const row of arming) {
+    try {
+      if(await recoverReservation("playbook",row.id))
+        await q("UPDATE playbooks SET status='armed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
+    } catch(err) { result.errors.push(`arming ${row.id}: ${(err as Error).message}`); }
+  }
   await reapStuckPlaybooks(result).catch((err) =>
     result.errors.push(`reap: ${(err as Error).message}`),
   );
@@ -837,4 +872,12 @@ export async function playbookTick(): Promise<PlaybookTickResult> {
     }
   }
   return result;
+}
+
+function priorOutputAmount(steps:PlaybookStep[],step:PlaybookStep):string {
+ const prior=steps[step.funding?.stepIndex??-1];
+ if(prior?.status!=="done"||!prior.amountOutRaw) throw new Error("Confirmed upstream funding is missing.");
+ const percent=parseUnits(step.action.amount,4);if(percent<=0n||percent>1000000n) throw new Error("Invalid upstream percentage.");
+ const raw=BigInt(prior.amountOutRaw)*percent/1000000n;
+ return formatUnits(raw,tokenBySymbol(step.action.tokenIn)!.decimals);
 }

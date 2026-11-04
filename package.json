@@ -4,7 +4,7 @@
   "private": true,
   "description": "An agent-native DEX. Trade by clicking, or by talking.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "web": "pnpm --filter @roque/web dev",

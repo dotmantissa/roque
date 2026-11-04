@@ -24,7 +24,7 @@ export async function run<T>(fn: () => Promise<T> | T): Promise<NextResponse> {
     const message = err instanceof Error ? err.message : "Unexpected error.";
     // Log the real thing server side; hand the caller something calm.
     console.error("[api]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "The request could not be completed. Check transaction status before retrying." }, { status: 500 });
   }
 }
 

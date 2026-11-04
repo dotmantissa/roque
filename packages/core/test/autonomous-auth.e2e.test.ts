@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
     message: string;
     expires_at: string;
     consumed_at: string | null;
+    client_id: string; audience: string; scopes: string[];
   }>(),
   sessions: new Map<string, { owner_address: string; expires_at: string }>(),
   interpretCommand: vi.fn(),
@@ -21,12 +22,14 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../src/db/index.js", () => ({
   q: vi.fn(async (text: string, params: unknown[] = []) => {
+    if (text.includes("INSERT INTO api_budgets")) return [{count:1}];
     if (text.includes("INSERT INTO auth_challenges")) {
       state.challenges.set(String(params[0]), {
         owner_address: String(params[1]),
         message: String(params[3]),
         expires_at: String(params[4]),
         consumed_at: null,
+        client_id:String(params[5]),audience:String(params[6]),scopes:params[7] as string[],
       });
       return [];
     }
@@ -40,6 +43,7 @@ vi.mock("../src/db/index.js", () => ({
         return [];
       }
       row.consumed_at = new Date().toISOString();
+      state.sessions.set(String(params[1]),{owner_address:row.owner_address,expires_at:String(params[2])});
       return [{ owner_address: row.owner_address }];
     }
     if (text.includes("INSERT INTO auth_sessions")) {

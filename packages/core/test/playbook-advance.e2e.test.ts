@@ -29,6 +29,7 @@ const state = vi.hoisted(() => ({
   getCommitment: vi.fn(),
 }));
 
+vi.mock("../src/settlement.js",()=>({vaultSettlement:vi.fn(async()=>stranded?{status:"pending",txHash:TX}:{status:"confirmed",txHash:TX,amountOutRaw:"1000000000000000000"})}));
 vi.mock("../src/db/index.js", () => ({ q: state.q }));
 // The only chain read on this path is the funding gate arming does. It reads a
 // balance we choose, so the real gate runs rather than being mocked away.
@@ -40,6 +41,7 @@ vi.mock("../src/intents.js", () => ({
   lockCommitments: state.lockCommitments,
   releaseCommitments: state.releaseCommitments,
   getCommitment: state.getCommitment,
+  NO_COMMITMENT: "0x"+"00".repeat(32),
 }));
 vi.mock("../src/genlayer.js", () => ({ adjudicate: state.adjudicate, interpret: vi.fn() }));
 vi.mock("../src/services.js", () => ({
@@ -129,6 +131,8 @@ beforeEach(() => {
     sqls.push(text);
     const t = text.replace(/\s+/gu, " ").trim();
 
+    if(t.startsWith("SELECT * FROM playbooks WHERE status='arming'")) return row.status==='arming'?[{...row}]:[];
+    if(t.startsWith("SELECT * FROM playbooks WHERE status='armed'")) return row.status==='armed'&&row.steps[row.step_cursor]?.status==='firing'?[{...row}]:[];
     if (t.startsWith("SELECT * FROM playbooks")) {
       // Honour the owner filter when the statement carries one. Ownership is
       // security-relevant, so a mock that answered regardless of who asked
@@ -204,7 +208,7 @@ beforeEach(() => {
     }
     // Arming rolled back because the chain would not take the hold.
     if (t.includes("SET status='draft', error=$2")) {
-      if (row.status !== "armed") return [];
+      if (row.status !== "arming") return [];
       Object.assign(row, { status: "draft", error: params[1] });
       return [];
     }
@@ -226,11 +230,13 @@ beforeEach(() => {
       });
       return [{ ...row }];
     }
-    if (t.includes("SET status='armed'")) {
+    if(t.includes("SET status='armed',updated_at")){if(row.status!=="arming")return [];row.status="armed";return [{...row}];}
+    if(t.includes("SET steps=$2::jsonb,updated_at")){row.steps=JSON.parse(String(params[1]));return [];}
+    if (t.includes("SET status='arming'")) {
       // Guarded on 'draft', so two requests cannot both arm one plan.
       if (row.status !== "draft") return [];
       Object.assign(row, {
-        status: "armed",
+        status: "arming",
         steps: JSON.parse(String(params[1])) as PlaybookStep[],
         step_cursor: 0,
         error: null,
@@ -321,7 +327,7 @@ describe("armPlaybook", () => {
         normaliseStep(
           {
             trigger: { kind: "immediate" },
-            action: { tokenIn: "rWETH", tokenOut: "rUSDC", amount: "1", amountIsPercent: false },
+            action: { tokenIn: "rWETH", tokenOut: "rUSDC", amount: "100", amountIsPercent: true },
           },
           1,
         ),
@@ -469,7 +475,7 @@ describe("advancePlaybook", () => {
     // A ladder whose first rung did not fill must not go on to its second: the
     // later steps were sized and priced on the assumption the earlier ones ran.
     row = baseRow([mkStep({ kind: "immediate" }), mkStep({ kind: "immediate" })]);
-    state.executeVaultSwap.mockRejectedValue(new Error("vault balance is too low"));
+    state.preflightVaultSwap.mockRejectedValue(new Error("vault balance is too low"));
 
     const pb = await advancePlaybook("pb-1");
 
@@ -478,7 +484,7 @@ describe("advancePlaybook", () => {
     expect(pb.steps[0]!.status).toBe("failed");
     expect(pb.steps[0]!.error).toBe("vault balance is too low");
     expect(pb.stepCursor).toBe(0);
-    expect(state.executeVaultSwap).toHaveBeenCalledTimes(1);
+    expect(state.executeVaultSwap).not.toHaveBeenCalled();
   });
 
   it("rations an event step rather than checking it every tick", async () => {
@@ -561,7 +567,9 @@ describe("what a playbook promises the vault", () => {
   it("does not claim a rung the ladder feeds itself", async () => {
     // Step two spends the rWETH step one bought. Holding vault rWETH for it
     // would demand the person already own what the plan is about to acquire.
-    row = baseRow([fixedStep("100", "rUSDC", "rWETH"), fixedStep("1", "rWETH", "rUSDC")], {
+    const downstream = fixedStep("100", "rWETH", "rUSDC");
+    downstream.action.amountIsPercent = true;
+    row = baseRow([fixedStep("100", "rUSDC", "rWETH"), downstream], {
       status: "draft",
     });
     state.vaultBalance.mockResolvedValue(500_000_000n);
@@ -626,6 +634,16 @@ describe("what a playbook promises the vault", () => {
  * worker died with a transaction in the air.
  */
 describe("two workers reaching the same plan", () => {
+  it("retains a lost submission reply without releasing or repeating the rung", async () => {
+    row = baseRow([mkStep({kind:"immediate"})]);
+    held.hold({user_address:user,token:"rUSDC",amount_raw:"100000000",source_kind:"playbook",source_id:"pb-1",step_index:0});
+    state.executeVaultSwap.mockRejectedValue(new Error("RPC reply lost after broadcast"));
+    const book = await advancePlaybook("pb-1");
+    expect(book.status).toBe("armed");expect(book.steps[0].status).toBe("firing");
+    expect(held.held()).toHaveLength(1);
+    await advancePlaybook("pb-1");expect(state.executeVaultSwap).toHaveBeenCalledTimes(1);
+  });
+
   const absolute = (amount: string) =>
     normaliseStep(
       {
@@ -668,14 +686,15 @@ describe("two workers reaching the same plan", () => {
     expect(row.status).toBe("armed");
   });
 
-  it("fails a plan left mid-trade rather than firing the rung again", async () => {
+  it("retains an unknown mid-trade outcome without firing again", async () => {
     row = baseRow([absolute("100")], { status: "armed" });
     row.steps[0]!.status = "firing";
     stranded = true;
 
     await playbookTick();
 
-    expect(row.status).toBe("failed");
+    expect(row.status).toBe("armed");
+    expect(row.steps[0].status).toBe("firing");
     expect(state.executeVaultSwap).not.toHaveBeenCalled();
   });
 });

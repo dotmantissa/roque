@@ -17,6 +17,9 @@
  * read if the answer is no. Refusing early is the honest failure.
  */
 
+import {SubmissionPendingError} from "./chain.js";
+import {getCommitment} from "./intents.js";
+import {vaultSettlement} from "./settlement.js";
 import { randomUUID } from "node:crypto";
 import { tokenBySymbol, type TokenMeta } from "@roque/shared";
 import { adjudicate, type Adjudication } from "./genlayer.js";
@@ -24,7 +27,7 @@ import { q } from "./db/index.js";
 import { ethUsd } from "./prices.js";
 import { preflightVaultSwap, executeVaultSwap } from "./services.js";
 import { assertVaultFunds } from "./funding.js";
-import { commitmentIdFor, reserve, release } from "./reservations.js";
+import { commitmentIdFor, reserve, recoverReservation, release } from "./reservations.js";
 
 /**
  * How long an armed order waits between verdicts. A GenLayer adjudication is a
@@ -49,6 +52,7 @@ export type EventOrderStatus =
   | "rejected"
   | "armed"
   /** Mid-trade. Brief, and nothing else may touch the row while it lasts. */
+  | "arming"
   | "firing"
   | "filled"
   | "failed"
@@ -531,7 +535,7 @@ export async function armEventOrder(id: string, user: string): Promise<EventOrde
   ]);
 
   const armed = await q<EventOrderRow>(
-    `UPDATE event_orders SET status='armed', error=NULL, updated_at=now()
+    `UPDATE event_orders SET status='arming', error=NULL, updated_at=now()
       WHERE id=$1 AND status='screened' RETURNING *`,
     [id],
   );
@@ -563,6 +567,7 @@ export async function armEventOrder(id: string, user: string): Promise<EventOrde
       },
     ]);
   } catch (err) {
+    if(err instanceof SubmissionPendingError) return toEventOrder(armed[0]);
     // The lock is written before the row that records it, so a failure in
     // between leaves money held on-chain for something that is no longer armed.
     // `release` derives its candidate ids from the source instead of reading a
@@ -584,7 +589,7 @@ export async function armEventOrder(id: string, user: string): Promise<EventOrde
     }
     await q(
       `UPDATE event_orders SET status='screened', error=$2, updated_at=now()
-        WHERE id=$1 AND status='armed'`,
+        WHERE id=$1 AND status='arming'`,
       [
         id,
         `could not hold the vault money: ${(err as Error).message}` +
@@ -593,7 +598,8 @@ export async function armEventOrder(id: string, user: string): Promise<EventOrde
     );
     throw err;
   }
-  return toEventOrder(armed[0]);
+  const completed=await q<EventOrderRow>(`UPDATE event_orders SET status='armed',updated_at=now() WHERE id=$1 AND status='arming' RETURNING *`,[id]);
+  return toEventOrder(completed[0]??armed[0]);
 }
 
 async function reject(
@@ -715,6 +721,7 @@ async function fill(row: EventOrderRow): Promise<EventOrder> {
   );
   if (claimed.length !== 1) return toEventOrder(row);
 
+  let submissionStarted = false;
   try {
     const plan = await preflightVaultSwap({
       user: row.user_address as `0x${string}`,
@@ -725,18 +732,19 @@ async function fill(row: EventOrderRow): Promise<EventOrder> {
       slippageBps: row.slippage_bps,
       commitmentId: commitmentIdFor("event_order", row.id),
     });
-    const txHash = await executeVaultSwap(row.user_address as `0x${string}`, plan);
+    submissionStarted = true;
+    const txHash = await executeVaultSwap(row.user_address as `0x${string}`, plan,`event:${row.id}`);
     const done = await q<EventOrderRow>(
-      `UPDATE event_orders SET status='filled', tx_hash=$2, error=NULL, updated_at=now()
+      `UPDATE event_orders SET status='firing', tx_hash=$2, error=NULL, updated_at=now()
         WHERE id=$1 AND status='firing' RETURNING *`,
       [row.id, txHash],
     );
     // The promise was kept, so the claim is spent rather than released. The
     // money has genuinely left the vault by now and the on-chain balance
     // already reflects that; holding it twice would under-report what is free.
-    await release("event_order", row.id, "spent");
-    return toEventOrder(done[0] ?? row);
+    return reconcileEvent(done[0] ?? {...row,tx_hash:txHash});
   } catch (err) {
+    if (submissionStarted) return toEventOrder({...row,status:"firing"});
     const message = (err as Error).message;
     // Retry a blip; give up on a refusal the next attempt would also earn, and
     // give up either way once the attempts are spent, so a broken order cannot
@@ -836,28 +844,18 @@ export async function eventTick(): Promise<EventTickResult> {
     }
   }
 
-  // A row stuck at 'firing' means the worker holding it died between sending the
-  // swap and recording what happened. We cannot tell from here whether the trade
-  // landed, so the order fails rather than going back to armed: a retry risks
-  // spending twice, which is worse than an order the person has to look up and
-  // write again. The hold goes either way, since a commitment the swap consumed
-  // releases as a no-op and one it never reached should not stay locked.
-  const stranded = await q<{ id: string }>(
-    `UPDATE event_orders SET status='failed',
-        error='This order was interrupted mid-trade. Check your activity for whether it landed.',
-        updated_at=now()
-      WHERE status='firing' AND updated_at < now() - interval '10 minutes'
-      RETURNING id`,
-  );
-  for (const { id } of stranded) {
+  const arming=await q<EventOrderRow>(`${SELECT} WHERE status='arming' AND updated_at<now()-interval '5 minutes' ORDER BY updated_at LIMIT 20`);
+  for(const row of arming) {
     try {
-      await release("event_order", id);
-    } catch (err) {
-      result.errors.push(`reap ${id}: ${(err as Error).message}`);
-    }
+      if(await recoverReservation("event_order",row.id))
+        await q("UPDATE event_orders SET status='armed',updated_at=now() WHERE id=$1 AND status='arming'",[row.id]);
+    } catch(err) { result.errors.push(`arming ${row.id}: ${(err as Error).message}`); }
+  }
+  const submitted=await q<EventOrderRow>(`${SELECT} WHERE status='firing' ORDER BY updated_at LIMIT 20`);
+  for(const row of submitted) {
+    try { await reconcileEvent(row); } catch(err) { result.errors.push(`reconcile ${row.id}: ${(err as Error).message}`); }
   }
 
-  // Sweep anything that ran out its clock without a verdict.
   // 'firing' is deliberately absent. A row whose swap is in the mempool must
   // not be expired out from under it, or the sweep releases the hold the trade
   // is about to spend.
@@ -879,4 +877,13 @@ export async function eventTick(): Promise<EventTickResult> {
   if (expired.length > 0) result.evaluated += expired.length;
 
   return result;
+}
+
+async function reconcileEvent(row:EventOrderRow):Promise<EventOrder> {
+ const settlement=await vaultSettlement(`event:${row.id}`);
+ if(settlement.status==="pending") return toEventOrder({...row,status:"firing"});
+ const rows=await q<EventOrderRow>(`UPDATE event_orders SET status=$2,tx_hash=$3,error=$4,updated_at=now() WHERE id=$1 AND status='firing' RETURNING *`,
+   [row.id,settlement.status==="confirmed"?"filled":"failed",settlement.txHash,settlement.status==="reverted"?"Transaction reverted":null]);
+ if(rows[0]) await release("event_order",row.id,settlement.status==="confirmed"?"spent":"released");
+ return toEventOrder(rows[0]??row);
 }
