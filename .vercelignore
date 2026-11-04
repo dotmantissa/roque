@@ -1,6 +1,16 @@
 # Heavy trees the web build never imports.
 contracts
-apps/relayer
 packages/genlayer
 ARCHITECTURE.md
 **/.git
+
+# Private/local recovery files never belong in the deployment upload.
+TASKS.md
+**/[Aa][Gg][Ee][Nn][Tt].md
+**/[Aa][Gg][Ee][Nn][Tt][Ss].md
+**/.env*
+**/node_modules
+**/.next
+**/.vercel
+**/*.log
+**/*.tsbuildinfo
