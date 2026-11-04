@@ -82,14 +82,12 @@ export function serverEnv() {
   return {
     ...publicEnv,
     agentSignerKey: agentSignerKey(),
-    // The keeper and the grant relayer both need to pay gas on Sepolia. In this
-    // deployment the deployer wallet doubles as that gas payer; a production
-    // setup would use a dedicated, minimally funded hot wallet.
+    // Production uses a dedicated, minimally funded gas payer distinct from
+    // the administrator and the agent authorization signer.
     relayerKey,
-    // When both are present the relayer's Sepolia writes egress through a Latch
-    // proxy instead of straight to the RPC: Latch injects the real provider key,
-    // rate limits the channel and keeps a signed audit trail. Leave them unset
-    // and the relayer talks to SEPOLIA_RPC_URL directly, exactly as before.
+    // Production requires complete Latch configuration. Denials and outages
+    // propagate without direct-RPC fallback; hosted policy and audit retention
+    // must be verified with provider evidence.
     latchRpcUrl,
     latchToken,
     latchRequired,
