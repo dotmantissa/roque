@@ -75,7 +75,7 @@ async function reserveOperation(ctx:RequestContext,operation:string,key:unknown,
  }finally{await releaseLease(lease).catch(()=>{});}
  const row=rows[0];if(!row) return fail(503,"STORAGE_UNAVAILABLE","Operation could not be persisted.");
  if(row.request_hash!==hash) return fail(409,"IDEMPOTENCY_CONFLICT","This key already belongs to different request fields.");
- const claim=await q<Operation>(`UPDATE api_operations SET lease_owner=$2,lease_until=now()+interval '5 minutes',generation=generation+1 WHERE id=$1 AND result IS NULL AND (lease_until IS NULL OR lease_until<now()) RETURNING *`,[row.id,id]);
+ const claim=await q<Operation>(`UPDATE api_operations SET lease_owner=$2,lease_until=now()+interval '5 minutes',generation=generation+1 WHERE id=$1 AND result IS NULL AND (lease_until IS NULL OR lease_until<=now()) RETURNING *`,[row.id,id]);
  return {row:claim[0]??row,created:claim.length===1,leaseOwner:id};
 }
 async function ownedOperation(ctx:RequestContext,id:unknown,operation="intent") {
@@ -98,7 +98,7 @@ export async function interpretationTick() {
  try {
  const owner=randomUUID();
  const rows=await q<Operation & {client_id:string;owner_address:Hex}>(`WITH candidate AS (SELECT id FROM api_operations WHERE operation='intent' AND
-   (status='queued' OR (status='interpreting' AND lease_until<now())) AND attempts<3 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
+   (status='queued' OR (status='interpreting' AND lease_until<=now())) AND attempts<3 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
    UPDATE api_operations SET status='interpreting',lease_owner=$1,lease_until=now()+interval '5 minutes',generation=generation+1,attempts=attempts+1,updated_at=now()
    WHERE id IN(SELECT id FROM candidate) RETURNING *`,[owner]);
  for(const row of rows) {
@@ -110,10 +110,10 @@ export async function interpretationTick() {
    await q(`UPDATE api_operations SET result=$2::jsonb,status=$3,error_code=$4,updated_at=now() WHERE id=$1 AND lease_owner=$5 AND generation=$6 AND lease_until>now()`,
     [row.id,JSON.stringify(result),supported?"ready":"rejected",supported?null:"UNSUPPORTED_INTENT",owner,row.generation]);
   } catch {
-   await q("UPDATE api_operations SET status='failed',error_code='INTERPRETATION_FAILED',updated_at=now() WHERE id=$1 AND lease_owner=$2 AND generation=$3",[row.id,owner,row.generation]);
+   await q("UPDATE api_operations SET status='failed',error_code='INTERPRETATION_FAILED',updated_at=now() WHERE id=$1 AND lease_owner=$2 AND generation=$3 AND lease_until>now()",[row.id,owner,row.generation]);
   }
  }
- await q("UPDATE api_operations SET status='failed',error_code='INTERPRETATION_EXHAUSTED' WHERE operation='intent' AND status='interpreting' AND lease_until<now() AND attempts>=3");
+ await q("UPDATE api_operations SET status='failed',error_code='INTERPRETATION_EXHAUSTED' WHERE operation='intent' AND status='interpreting' AND lease_until<=now() AND attempts>=3");
  } finally {await releaseLease(lease).catch(()=>{});}
 }
 export async function createQuote(ctx:RequestContext,body:unknown,key:unknown) {
@@ -203,9 +203,10 @@ export async function approvalLink(ctx:RequestContext,id:unknown,key:unknown) {
  const reserved=await reserveOperation(ctx,`approval:${row.id}`,key,{});if(!reserved.created) return reserved.row.result??{id:reserved.row.id,status:reserved.row.status};
  const token=randomBytes(32).toString("base64url"),expiresAt=Math.min(row.payload.expiresAt,Math.floor(Date.now()/1000)+120);
  const result={url:`${authOrigin()}/approve#${token}`,expiresAt,swapId:row.id};
- await q(`WITH link AS (INSERT INTO approval_links(token_hash,swap_id,client_id,owner_address,expires_at,connection_token_hash) VALUES($1,$2,$3,$4,to_timestamp($5),$8) RETURNING token_hash)
-  UPDATE api_operations SET result=$6::jsonb,status='ready' WHERE id=$7 AND EXISTS(SELECT 1 FROM link)`,[tokenHash(token),row.id,ctx.clientId,ctx.owner,expiresAt,JSON.stringify(result),reserved.row.id,tokenHash(ctx.token)]);
- return result;
+ const saved=await q<{result:typeof result}>(`WITH link AS (INSERT INTO approval_links(token_hash,swap_id,client_id,owner_address,expires_at,connection_token_hash)
+  SELECT $1,$2,$3,$4,to_timestamp($5),$8 WHERE EXISTS(SELECT 1 FROM api_operations WHERE id=$7 AND lease_owner=$9 AND generation=$10 AND lease_until>now()) RETURNING token_hash)
+  UPDATE api_operations SET result=$6::jsonb,status='ready' WHERE id=$7 AND lease_owner=$9 AND generation=$10 AND EXISTS(SELECT 1 FROM link) RETURNING result`,[tokenHash(token),row.id,ctx.clientId,ctx.owner,expiresAt,JSON.stringify(result),reserved.row.id,tokenHash(ctx.token),reserved.leaseOwner,reserved.row.generation]);
+ return saved[0]?.result??fail(409,"OPERATION_PENDING","Operation ownership expired. Retry the same key.");
 }
 
 /** A link is an object locator. A separate owner proof is required to use it. */
