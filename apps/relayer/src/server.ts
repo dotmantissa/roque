@@ -79,6 +79,11 @@ app.setErrorHandler((err, _req, reply) => {
     reply.status(err.status).send({ error: err.message });
     return;
   }
+  const transportError=err as {code?:string;statusCode?:number};
+  if(transportError.code?.startsWith("FST_ERR_") && transportError.statusCode && transportError.statusCode>=400 && transportError.statusCode<500){
+    const status=transportError.statusCode;
+    reply.status(status).send({error:{code:status===413?"BODY_TOO_LARGE":"INVALID_REQUEST",message:status===413?"Request body exceeds the size limit.":"Invalid request body or content type.",requestId:_req.id}});return;
+  }
   app.log.error(err);
   if(_req.url.startsWith("/v1/")) {const status=(err as {statusCode?:number}).statusCode;reply.status(status===413?413:500).send({error:{code:status===413?"BODY_TOO_LARGE":"INTERNAL_ERROR",message:"Request could not be completed. Check status before retrying.",requestId:_req.id}});}
   else reply.status(500).send({ error: "Something went wrong on our side. Try again in a moment." });

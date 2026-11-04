@@ -43,3 +43,11 @@ it('links a wallet, exchanges a PKCE code once, enforces audience and revokes MC
  await app.inject({method:'POST',url:'/oauth/revoke',payload:{token:access}});
  expect((await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:4,method:'tools/list'}})).statusCode).toBe(401);
 });
+
+it('returns client errors for empty and malformed JSON bodies',async()=>{
+ for(const payload of ['', '{']){
+  const r=await app.inject({method:'POST',url:'/v1/intents',headers:{'content-type':'application/json'},payload});
+  expect(r.statusCode).toBe(400);
+  expect(r.json().error.code).toBe('INVALID_REQUEST');
+ }
+});

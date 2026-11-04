@@ -13,7 +13,7 @@ export async function dispatchPublic(req:Request,path?:string){
  if(!["GET","HEAD"].includes(req.method)){
   const reader=req.body?.getReader();const chunks:Uint8Array[]=[];let size=0;
   if(reader)try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384){await reader.cancel();return new Response(JSON.stringify({error:{code:"BODY_TOO_LARGE",message:"Request exceeds 16 KiB."}}),{status:413,headers:{"content-type":"application/json"}});}chunks.push(value);}}finally{reader.releaseLock();}
-  payload=Buffer.concat(chunks).toString("utf8");
+  if(size>0)payload=Buffer.concat(chunks).toString("utf8");
  }
  server??=createMcpServer().catch(err=>{server=undefined;throw err;});
  const app=await server;

@@ -42,7 +42,7 @@ export class RoqueClient {
   this.token=options.accessToken;
  }
  private async request<T>(path:string,method="GET",body?:unknown,key?:string):Promise<T>{
-  const response=await(this.options.fetch??fetch)(new URL(path,this.baseUrl),{method,redirect:"error",headers:{"content-type":"application/json",...(this.options.apiKey?{"x-api-key":this.options.apiKey}:{}),...(this.token?{authorization:`Bearer ${this.token}`}:{ }),...(key?{"idempotency-key":key}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  const response=await(this.options.fetch??fetch)(new URL(path,this.baseUrl),{method,redirect:"error",headers:{...(body===undefined?{}:{"content-type":"application/json"}),...(this.options.apiKey?{"x-api-key":this.options.apiKey}:{}),...(this.token?{authorization:`Bearer ${this.token}`}:{ }),...(key?{"idempotency-key":key}:{})},body:body===undefined?undefined:JSON.stringify(body)});
   const result=await response.json();if(!response.ok) throw new Error(result.error?.message??"Request failed; check status before retrying.");return result as T;
  }
  tokens(){return this.request("/v1/tokens");}

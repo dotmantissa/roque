@@ -51,4 +51,6 @@ it('settles an independent app wallet through HTTP, SQL, SDK and real EVM receip
  expect(after-before).toBe(BigInt(settled.settlement!.amountOutRaw));expect(after-before).toBeGreaterThanOrEqual(BigInt(plan.minAmountOutRaw));
  expect((await s.client.readContract({address:s.tokens[0].address,abi:erc20Abi,functionName:'balanceOf',args:[user.address]}))).toBe(990_000000n);
  expect((await s.db.query('SELECT * FROM swap_plans WHERE tx_hash=$1',[hash])).rows).toHaveLength(1);
+ await sdk.disconnect();
+ expect((await s.db.query('SELECT * FROM auth_sessions WHERE owner_address=$1 AND revoked_at IS NULL',[user.address.toLowerCase()])).rows).toHaveLength(0);
 },30000);
