@@ -1443,6 +1443,12 @@ h1, h2, h3, h4 {
   flex-shrink: 0;
 }
 .landing-nav-right { display: flex; align-items: center; gap: 12px; }
+@media (max-width: 480px) {
+  .landing { padding-inline: 16px; }
+  .landing-nav-right { gap: 4px; }
+  .landing-nav-right .btn { padding-inline: 9px; font-size: 0.75rem; }
+  .landing-nav-right .btn svg { display: none; }
+}
 .landing-main {
   flex: 1;
   display: flex;

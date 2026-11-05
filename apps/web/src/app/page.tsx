@@ -61,6 +61,7 @@ export default function Landing() {
           <RoqueLogo size={26} />
         </Link>
         <div className="landing-nav-right">
+          <Link href="/dev" className="btn btn-ghost">Dev</Link>
           <ThemeToggle />
           {wallet.connected ? (
             <Link href="/copilot" className="btn btn-primary">

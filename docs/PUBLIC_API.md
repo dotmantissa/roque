@@ -1,5 +1,7 @@
 # Public wallet swap API
 
+The public [Dev page](https://roque-dex.vercel.app/dev), linked from the landing page, includes copyable HTTP calls, wallet-proof and SDK examples, partner-app setup, MCP connection details and an endpoint table generated from OpenAPI.
+
 Base URL: `https://roque-dex.vercel.app`. API reference: `/v1/openapi.json`. The allowlisted beta supports Sepolia test tokens, immediate absolute exact-input swaps and settlement into the authenticated EOA wallet. Application credentials belong on the partner backend. The browser receives only wallet proof/session information and reviewed transaction plans.
 
 1. Register an application with `scripts/register-api-client.ts`, supplying a private absolute key-file path outside the repository and the application name. Only the key hash enters the database.
