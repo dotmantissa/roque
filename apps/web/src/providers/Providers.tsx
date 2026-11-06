@@ -45,7 +45,7 @@ function WalletLayer({ children }: { children: React.ReactNode }) {
         appearance: {
           theme: theme === "dark" ? "dark" : "light",
           accentColor: theme === "dark" ? "#2f6bff" : "#003dad",
-          walletList: ["metamask", "rainbow", "coinbase_wallet", "wallet_connect", "detected_wallets"],
+                    walletList: ["detected_wallets", "metamask", "rabby_wallet", "rainbow", "coinbase_wallet", "wallet_connect"],
           showWalletLoginFirst: true,
         },
       }}
