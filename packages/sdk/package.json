@@ -1,1 +1,1 @@
-{"name":"@roque/sdk","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","scripts":{"typecheck":"tsc --noEmit"},"dependencies":{"@roque/shared":"workspace:*","viem":"^2.55.13"},"devDependencies":{"typescript":"^5.7.3","@types/node":"^22.20.1"}}
+{"name":"@roque/sdk","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","scripts":{"typecheck":"tsc --noEmit"},"dependencies":{"@roque/shared":"workspace:*","viem":"^2.57.16"},"devDependencies":{"typescript":"^5.7.3","@types/node":"^22.20.1"}}
