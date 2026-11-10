@@ -7,6 +7,7 @@ import {authOrigin} from "@roque/core/env";
 import {API_SCOPES} from "@roque/core/public-api";
 import {authenticatedOwner,tokenHash,revokeSession} from "../../../packages/core/src/auth.js";
 import {admit} from "../../../packages/core/src/admission.js";
+import {diagnosticReason} from "./diagnostics.js";
 export function mcpResource(){const url=process.env.MCP_RESOURCE_URL??`${authOrigin()}/mcp`;return new URL(url).href;}
 const clientModel=async(id:string)=>{
  const rows=await q<{id:string;redirects:string[];scopes:string[]}>("SELECT id,redirects,scopes FROM api_clients WHERE id=$1 AND revoked_at IS NULL",[id]);
@@ -39,6 +40,16 @@ export const oauth=new OAuth2Server({accessTokenLifetime:3600,authorizationCodeL
   verifyScope:async(token,scope)=>scope.every(s=>token.scope?.includes(s)),
  }});
 function bearer(header:string|undefined){return header?.match(/^Bearer ([A-Za-z0-9_-]+)$/u)?.[1];}
+const scopeString=z.string().min(1).max(300).regex(/^[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*$/u);
+const registration=z.object({
+ client_name:z.string().min(1).max(100).optional(),
+ redirect_uris:z.array(z.string().url().max(2000)).min(1).max(5),
+ grant_types:z.array(z.literal("authorization_code")).length(1).optional(),
+ response_types:z.array(z.literal("code")).length(1).optional(),
+ token_endpoint_auth_method:z.literal("none").optional(),
+ scope:scopeString.optional(),
+ // RFC 7591 requires ignoring client metadata we do not understand.
+}).strip();
 const authQuery=z.object({client_id:z.string().max(128),redirect_uri:z.string().url().max(2000),response_type:z.literal("code"),
  code_challenge:z.string().regex(/^[A-Za-z0-9_-]{43}$/u),code_challenge_method:z.literal("S256"),state:z.string().min(16).max(500),
  resource:z.string().url(),scope:z.string().max(300).optional()}).strict();
@@ -49,16 +60,27 @@ export async function registerOAuth(app:FastifyInstance){
  app.get("/.well-known/oauth-authorization-server",async()=>({issuer,authorization_endpoint:`${issuer}/oauth/authorize`,token_endpoint:`${issuer}/oauth/token`,registration_endpoint:`${issuer}/oauth/register`,revocation_endpoint:`${issuer}/oauth/revoke`,response_types_supported:["code"],grant_types_supported:["authorization_code"],token_endpoint_auth_methods_supported:["none"],code_challenge_methods_supported:["S256"],scopes_supported:[...API_SCOPES]}));
  app.post("/oauth/register",async(req,reply)=>{
   await admit(`oauth-register:${req.ip}`,10);
-  const input=z.object({client_name:z.string().min(1).max(100),redirect_uris:z.array(z.string().url().max(2000)).min(1).max(5),grant_types:z.array(z.literal("authorization_code")).optional(),response_types:z.array(z.literal("code")).optional(),token_endpoint_auth_method:z.literal("none").optional()}).strict().parse(req.body);
-  const allowed=(process.env.OAUTH_ALLOWED_REDIRECTS??"").split(",").filter(Boolean);
-  if(input.redirect_uris.some(u=>!allowed.includes(u))) return reply.status(400).send({error:"invalid_redirect_uri"});
-  const id=randomUUID();await q("INSERT INTO api_clients(id,key_hash,name,scopes,redirects) VALUES($1,$2,$3,$4,$5)",[id,tokenHash(randomBytes(32).toString("base64url")),input.client_name,[...API_SCOPES],input.redirect_uris]);
-  return reply.status(201).send({client_id:id,client_name:input.client_name,redirect_uris:input.redirect_uris,grant_types:["authorization_code"],response_types:["code"],token_endpoint_auth_method:"none"});
+  const parsed=registration.safeParse(req.body);
+  if(!parsed.success){
+   diagnosticReason(req,"invalid_client_metadata",parsed.error.issues.map(issue=>String(issue.path[0])));
+   return reply.status(400).send({error:"invalid_client_metadata",error_description:"Invalid or unsupported registration fields."});
+  }
+  const input=parsed.data,scopes=input.scope?[...new Set(input.scope.split(" "))]:[...API_SCOPES];
+  if(scopes.some(scope=>!API_SCOPES.includes(scope as typeof API_SCOPES[number]))){
+   diagnosticReason(req,"invalid_client_metadata",["scope"]);
+   return reply.status(400).send({error:"invalid_client_metadata",error_description:"Requested scope is not supported."});
+  }
+  const allowed=(process.env.OAUTH_ALLOWED_REDIRECTS??"").split(",").map(value=>value.trim()).filter(Boolean);
+  if(input.redirect_uris.some(u=>!allowed.includes(u))){diagnosticReason(req,"invalid_redirect_uri");return reply.status(400).send({error:"invalid_redirect_uri",error_description:"Every redirect URI must be explicitly allowlisted."});}
+  const id=randomUUID(),name=input.client_name??`MCP client ${id}`;
+  await q("INSERT INTO api_clients(id,key_hash,name,scopes,redirects) VALUES($1,$2,$3,$4,$5)",[id,tokenHash(randomBytes(32).toString("base64url")),name,scopes,input.redirect_uris]);
+  return reply.status(201).send({client_id:id,client_name:name,redirect_uris:input.redirect_uris,grant_types:["authorization_code"],response_types:["code"],token_endpoint_auth_method:"none",scope:scopes.join(" ")});
  });
  app.get("/oauth/authorize",async(req,reply)=>{
   await admit(`oauth-authorize:${req.ip}`,20);const query=authQuery.parse(req.query);
   const client=await clientModel(query.client_id);if(!client||!client.redirectUris.includes(query.redirect_uri)||query.resource!==mcpResource())return reply.status(400).send({error:"invalid_request"});
-  query.scope=query.scope??API_SCOPES.join(" ");
+  query.scope=query.scope??client.scope.join(" ");
+  if(!scopeString.safeParse(query.scope).success||query.scope.split(" ").some(scope=>!(client.scope as string[]).includes(scope))){diagnosticReason(req,"invalid_scope");return reply.status(400).send({error:"invalid_scope",error_description:"Requested scope is not permitted for this client."});}
   const requestId=randomUUID();await q("INSERT INTO oauth_requests(id,query,expires_at) VALUES($1,$2::jsonb,now()+interval '5 minutes')",[requestId,JSON.stringify(query)]);
   return reply.redirect(`${authOrigin()}/connect?request=${requestId}`);
  });

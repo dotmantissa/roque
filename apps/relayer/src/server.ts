@@ -7,8 +7,10 @@
  */
 
 import {pathToFileURL} from "node:url";
+import {randomUUID} from "node:crypto";
 import OAuth2Server from "@node-oauth/oauth2-server";
 import {registerOAuth} from "./oauth.js";
+import {registerDiagnostics,diagnosticReason} from "./diagnostics.js";
 import Fastify from "fastify";
 import {z,ZodError} from "zod";
 import {admitTransport,admit} from "../../../packages/core/src/admission.js";
@@ -61,16 +63,25 @@ import {
 import { startWorkers } from "./workers.js";
 
 export async function createServer() {
-const app = Fastify({logger:false,bodyLimit:16384});
+const app = Fastify({logger:false,bodyLimit:16384,requestIdHeader:false,genReqId:()=>randomUUID()});
+registerDiagnostics(app);
 app.addHook("onRequest",async req=>{admitTransport(req.ip);await admit("global:http",600);});
-app.addHook("onSend",async(_req,reply)=>{reply.header("Cache-Control","no-store");reply.header("X-Content-Type-Options","nosniff");});
+app.addHook("onSend",async(req,reply)=>{reply.header("Cache-Control","no-store");reply.header("X-Content-Type-Options","nosniff");reply.header("X-Request-Id",req.id);});
 app.addContentTypeParser("application/x-www-form-urlencoded",{parseAs:"string"},(_req,body,done)=>{
   const parsed=Object.fromEntries(new URLSearchParams(String(body)));done(null,parsed);
 });
 const allowedOrigins=(process.env.API_ALLOWED_ORIGINS??"http://localhost:3000").split(",");
-await app.register(cors,{origin:allowedOrigins,allowedHeaders:["content-type","authorization","x-api-key","idempotency-key"],methods:["GET","POST","DELETE","OPTIONS"]});
+await app.register(cors,{origin:allowedOrigins,allowedHeaders:["content-type","authorization","x-api-key","idempotency-key"],exposedHeaders:["x-request-id"],methods:["GET","POST","DELETE","OPTIONS"]});
 
 app.setErrorHandler((err, _req, reply) => {
+  if(_req.url.split("?",1)[0]==="/oauth/register"){
+    if((err as {status?:number}).status===429){diagnosticReason(_req,"rate_limited");reply.header("Retry-After","60").status(429).send({error:"temporarily_unavailable",error_description:"Registration quota exceeded. Retry after one minute."});return;}
+    const transport=err as {code?:string;statusCode?:number};
+    if(err instanceof ZodError||(transport.code?.startsWith("FST_ERR_")&&transport.statusCode&&transport.statusCode>=400&&transport.statusCode<500)){
+      diagnosticReason(_req,"invalid_client_metadata");reply.status(transport.statusCode===413?413:400).send({error:"invalid_client_metadata",error_description:"Invalid registration fields, body or content type."});return;
+    }
+    diagnosticReason(_req,"internal_error");reply.status(500).send({error:"server_error",error_description:"Registration service unavailable."});return;
+  }
   if(err instanceof OAuth2Server.OAuthError){reply.status(err.code).send({error:err.name,error_description:err.code<500?err.message:"Authorization service unavailable."});return;}
   if(err instanceof ZodError) {reply.status(400).send({error:{code:"INVALID_REQUEST",message:"Invalid request fields.",requestId:_req.id}});return;}
   if(err instanceof v1.PublicApiError) {reply.status(err.status).send({error:{code:err.code,message:err.message,requestId:_req.id}});return;}

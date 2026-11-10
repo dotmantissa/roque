@@ -1,4 +1,5 @@
 import "server-only";
+import {randomUUID} from "node:crypto";
 import {after} from "next/server";
 import {createMcpServer} from "@roque/mcp";
 import {interpretationTick} from "@roque/core/public-api";
@@ -12,7 +13,13 @@ export async function dispatchPublic(req:Request,path?:string){
  let payload:string|undefined;
  if(!["GET","HEAD"].includes(req.method)){
   const reader=req.body?.getReader();const chunks:Uint8Array[]=[];let size=0;
-  if(reader)try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384){await reader.cancel();return new Response(JSON.stringify({error:{code:"BODY_TOO_LARGE",message:"Request exceeds 16 KiB."}}),{status:413,headers:{"content-type":"application/json"}});}chunks.push(value);}}finally{reader.releaseLock();}
+  if(reader)try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384){
+   await reader.cancel();
+   const registration=url.pathname==="/oauth/register",requestId=randomUUID();
+   console.info(JSON.stringify({event:registration?"oauth_request":"public_api_error",timestamp:new Date().toISOString(),requestId,route:registration?"/oauth/register":"/public/*",method:req.method,status:413,reason:registration?"invalid_client_metadata":"rejected"}));
+   const body=registration?{error:"invalid_client_metadata",error_description:"Registration body exceeds 16 KiB."}:{error:{code:"BODY_TOO_LARGE",message:"Request exceeds 16 KiB.",requestId}};
+   return new Response(JSON.stringify(body),{status:413,headers:{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff","x-request-id":requestId}});
+  }chunks.push(value);}}finally{reader.releaseLock();}
   if(size>0)payload=Buffer.concat(chunks).toString("utf8");
  }
  server??=createMcpServer().catch(err=>{server=undefined;throw err;});
