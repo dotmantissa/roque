@@ -126,6 +126,12 @@ pnpm relayer    # the relayer and API
 pnpm keeper     # the keeper loop that settles resting orders
 ```
 
+For randomized testnet swaps against the deployed app, run `~/rialo/roque_run`.
+Use `~/rialo/roque_run --dry-run` for a read-only balance check and sample plans.
+The runner uses Autonomous Confirm/Direct exclusively, with a hard limit of
+100 Sepolia submissions including setup. Configuration, Latch routing, logs and
+recovery are documented in [the runner guide](scripts/runner/README.md).
+
 ## Testing
 
 The contracts carry a full Foundry suite, and it is meant to stay green.

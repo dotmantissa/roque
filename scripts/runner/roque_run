@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+runner_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+if [[ ! -d "$runner_dir/node_modules/viem" ]]; then
+  echo "Installing the runner's pinned dependency..." >&2
+  npm ci --prefix "$runner_dir" --ignore-scripts --no-audit --no-fund >&2
+fi
+exec node "$runner_dir/main.mjs" "$@"
