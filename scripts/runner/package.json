@@ -1,0 +1,8 @@
+{
+  "name": "roque-testnet-runner",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test runner.test.mjs" },
+  "dependencies": { "viem": "2.55.13" }
+}

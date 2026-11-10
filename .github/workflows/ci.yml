@@ -75,6 +75,12 @@ jobs:
       - name: Typecheck, test, and build
         run: pnpm check
 
+      - name: Test the standalone testnet runner
+        run: |
+          npm ci --prefix scripts/runner --ignore-scripts --no-audit --no-fund
+          npm test --prefix scripts/runner
+          bash -n scripts/runner/roque_run
+
   solidity:
     name: Solidity checks
     runs-on: ubuntu-24.04
